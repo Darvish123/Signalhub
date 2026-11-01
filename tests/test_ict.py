@@ -25,6 +25,8 @@ class ICTTests(unittest.TestCase):
         rows[10]=Candle(10*3600000,100,101,95,96,1000,10)
         rows[15]=Candle(15*3600000,98,100,94,96,1000,10)
         rows[18]=Candle(18*3600000,103,110,102,109,1000,10)
+        for i in list(range(19,20))+list(range(21,50)):
+            rows[i]=Candle(i*3600000,100,100.5,99,100,1000,10)
         rows[20]=Candle(20*3600000,103,104,100.5,102.5,1000,10)
         result=analyse_ict(rows,direction="LONG")
         self.assertEqual(result["status"],"ICT_CONFIRMED")
