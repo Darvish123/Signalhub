@@ -65,6 +65,16 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
     if fee_bps<0 or slippage_bps<0 or not 0<risk_pct<=2 or max_hold_bars<1 or not 0<max_leverage<=5 or initial_equity<=0:
         raise ValueError("Invalid backtest configuration")
     candles=validated_candles(candles,3600000)
+    # The daily EMA50 and confirmed structure require a genuine pre-test warm-up window.
+    warmup_ms=60*86400000
+    if start_ms-candles[0].time_ms<warmup_ms:
+        raise ValueError("Need at least 60 days of continuous 1H warm-up data before start_ms")
+    if funding_rates is not None:
+        funding_times=[x.funding_time_ms for x in funding_rates]
+        if len(funding_times)!=len(set(funding_times)):
+            raise ValueError("Duplicate historical funding settlement timestamps")
+        if any(x.mark_price<=0 for x in funding_rates):
+            raise ValueError("Funding mark prices must be positive")
     h4=aggregate(candles,14400000); d1=aggregate(candles,86400000)
     funding=sorted(funding_rates or [],key=lambda x:x.funding_time_ms)
     trades=[]; i=0; cost=(fee_bps+slippage_bps)/10000
@@ -76,7 +86,7 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         closed1h=candles[:i+1]
         if min(len(closed4),len(closed1d),len(closed1h))<60: i+=1; continue
         sig=analyse(symbol,"FUTURES",closed1d[-160:],closed4[-200:],closed1h[-200:],
-                    min_score=70,min_rr=3.,min_quote_volume=0,now_ms=decision)
+                    min_score=70,min_rr=3.,min_quote_volume=1_000_000,\n                    round_trip_cost_bps=2*(fee_bps+slippage_bps),now_ms=decision)
         if sig.status!="CANDIDATE" or sig.side not in ("LONG","SHORT") or None in (sig.stop_loss,sig.take_profit_1):
             i+=1; continue
         entry_bar=candles[i+1]; side=sig.side
@@ -127,8 +137,12 @@ def main():
     p.add_argument("--risk-pct",type=float,default=.5); p.add_argument("--max-leverage",type=float,default=1.)
     p.add_argument("--initial-equity",type=float,default=100.); p.add_argument("--out",default="backtest-report.json")
     a=p.parse_args(); data=load_csv(a.csv); rates=load_funding_csv(a.funding_csv)
-    start=int(datetime.fromisoformat(a.start).replace(tzinfo=timezone.utc).timestamp()*1000)
-    end=int(datetime.fromisoformat(a.end).replace(tzinfo=timezone.utc).timestamp()*1000)+86400000-1
+    start_dt=datetime.fromisoformat(a.start)
+    end_dt=datetime.fromisoformat(a.end)
+    start_dt=start_dt.replace(tzinfo=timezone.utc) if start_dt.tzinfo is None else start_dt.astimezone(timezone.utc)
+    end_dt=end_dt.replace(tzinfo=timezone.utc) if end_dt.tzinfo is None else end_dt.astimezone(timezone.utc)
+    start=int(start_dt.timestamp()*1000)
+    end=int(end_dt.timestamp()*1000)+86400000-1
     result=run_backtest(data,a.symbol,start,end,a.fee_bps,a.slippage_bps,a.risk_pct,
                         max_leverage=a.max_leverage,funding_rates=rates,initial_equity=a.initial_equity)
     Path(a.out).write_text(json.dumps(result,indent=2),encoding="utf-8")
