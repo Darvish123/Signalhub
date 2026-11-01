@@ -11,7 +11,11 @@ store=SignalStore(settings.database_path)
 
 @app.get("/health")
 async def health():
-    return {"status":"ok","service":"signalhub","version":"0.3.0","mode":"signals_only"}
+    try:
+        store.check()
+        return {"status":"ok","service":"signalhub","version":"0.3.0","mode":"signals_only","storage":"ok"}
+    except Exception as exc:
+        raise HTTPException(503, f"Storage unavailable: {exc}")
 
 @app.get("/v1/market/tickers")
 async def tickers(limit:int=Query(50,ge=1,le=200)):
@@ -25,7 +29,8 @@ async def klines(symbol:str,interval:str="15m",limit:int=Query(100,ge=20,le=200)
     try:
         rows=await client.futures_klines(symbol.upper(),interval,limit)
         return {"source":"bitunix_public_futures","symbol":symbol.upper(),"interval":interval,"count":len(rows),"data":[c.__dict__ for c in rows]}
-    except (ExchangeError,ValueError) as exc: raise HTTPException(502,str(exc))
+    except ValueError as exc: raise HTTPException(400,str(exc))
+    except ExchangeError as exc: raise HTTPException(502,str(exc))
 
 @app.get("/v1/analysis/smc/{symbol}")
 async def smc_analysis(symbol:str,interval:str="15m",limit:int=Query(200,ge=20,le=200)):
@@ -35,7 +40,8 @@ async def smc_analysis(symbol:str,interval:str="15m",limit:int=Query(200,ge=20,l
         validate_fresh_candles(candles,interval)
         result=analyse_smc(candles)
         return {"source":"bitunix_public_futures","symbol":symbol.upper(),"interval":interval,"candles":len(candles),**result}
-    except (ExchangeError,ValueError) as exc: raise HTTPException(502,str(exc))
+    except ValueError as exc: raise HTTPException(400,str(exc))
+    except ExchangeError as exc: raise HTTPException(502,str(exc))
 
 async def scan_one(symbol:str):
     regime,setup,entry=await asyncio.gather(
@@ -49,7 +55,8 @@ async def scan_one(symbol:str):
 @app.post("/v1/scan/{symbol}")
 async def scan(symbol:str):
     try: return await scan_one(symbol.upper())
-    except (ExchangeError,ValueError) as exc: raise HTTPException(502,str(exc))
+    except ValueError as exc: raise HTTPException(400,str(exc))
+    except ExchangeError as exc: raise HTTPException(502,str(exc))
 
 @app.post("/v1/scan")
 async def scan_universe(limit:int=Query(10,ge=1,le=20)):
@@ -76,6 +83,7 @@ async def signals(limit:int=Query(50,ge=1,le=200)):
 
 @app.get("/v1/signals/{signal_id}")
 async def detail(signal_id:int):
-    rows=[r for r in store.latest(200) if r["id"]==signal_id]
-    if not rows: raise HTTPException(404,"Signal not found")
-    return rows[0]
+    if signal_id < 1: raise HTTPException(400,"signal_id must be positive")
+    row=store.get(signal_id)
+    if row is None: raise HTTPException(404,"Signal not found")
+    return row
