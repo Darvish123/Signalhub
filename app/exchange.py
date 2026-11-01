@@ -45,7 +45,11 @@ class BitunixClient:
         return d
     async def futures_klines(self,symbol:str,interval:str,limit:int=200,candle_type:str="LAST_PRICE",end_time_ms:int|None=None)->list[Candle]:
         if interval not in INTERVAL_MS: raise ValueError("Unsupported interval")
-        if candle_type not in ("LAST_PRICE", "MARK_PRICE"): raise ValueError("Unsupported candle type")\n        d=await self._get(f"{self.futures_base}/api/v1/futures/market/kline",{"symbol":symbol,"interval":interval,"limit":min(max(limit,20),200),"type":candle_type})
+        if candle_type not in ("LAST_PRICE", "MARK_PRICE"): raise ValueError("Unsupported candle type")
+        if not 1 <= limit <= 200: raise ValueError("Kline limit must be between 1 and 200")
+        params={"symbol":symbol,"interval":interval,"limit":limit,"type":candle_type}
+        if end_time_ms is not None: params["endTime"]=end_time_ms
+        d=await self._get(f"{self.futures_base}/api/v1/futures/market/kline",params)
         if not isinstance(d,list) or not d: raise ExchangeError(f"No candles for {symbol} {interval}")
         out=[]
         invalid=[]
