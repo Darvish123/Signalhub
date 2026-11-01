@@ -84,7 +84,7 @@ def order_blocks(candles:list[Candle],events:list[StructureEvent]|None=None,look
             (candles[j].close<candles[j].open if event.direction=="BULLISH" else candles[j].close>candles[j].open)),None)
         if j is None: continue
         origin=candles[j]; status="UNMITIGATED"; mitigation_index=None
-        for k in range(j+1,len(candles)):
+        for k in range(event.index+1,len(candles)):
             x=candles[k]
             # A close through the distal edge invalidates the block; otherwise a revisit mitigates it.
             invalid=(event.direction=="BULLISH" and x.close<origin.low) or (event.direction=="BEARISH" and x.close>origin.high)
