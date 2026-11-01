@@ -23,6 +23,7 @@ class SMCTests(unittest.TestCase):
         self.assertEqual(premium_discount(rows,[] )["status"],"UNAVAILABLE")
         swings=[type("S",(),{"index":2,"kind":"LOW","price":8})(),
                 type("S",(),{"index":4,"kind":"HIGH","price":12})()]
+        rows[-1]=c(7,9.5,10,9,9.5)
         self.assertEqual(premium_discount(rows,swings)["zone"],"DISCOUNT")
     def test_order_block_mitigation(self):
         rows=[c(0,10,11,9,10),c(1,10,12,9,11),c(2,11,12,10,11),
