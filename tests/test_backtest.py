@@ -1,6 +1,6 @@
 import unittest
 from app.models import Candle
-from app.backtest import aggregate,run_backtest,load_csv
+from app.backtest import aggregate,run_backtest,load_csv,position_fraction_for_risk
 import tempfile, pathlib
 class BacktestTests(unittest.TestCase):
  def test_aggregate_ohlcv(self):
@@ -12,6 +12,12 @@ class BacktestTests(unittest.TestCase):
   result=run_backtest(rows,"TESTUSDT",rows[500].time_ms,rows[-1].time_ms)
   self.assertEqual(result["timeframe"],"15m")
   self.assertIn("stop wins",result["execution"])
+ def test_risk_budget_position_sizing(self):
+  # 0.5% risk with a 2% stop distance gives 25% notional at 1x max leverage.
+  self.assertAlmostEqual(position_fraction_for_risk(100,98,0.5,1.0),0.25)
+  # A very tight stop is capped by the configured leverage ceiling.
+  self.assertEqual(position_fraction_for_risk(100,99.99,0.5,1.0),1.0)
+  with self.assertRaises(ValueError): position_fraction_for_risk(100,100,0.5,1.0)
  def test_csv_validation(self):
   with tempfile.TemporaryDirectory() as d:
    p=pathlib.Path(d)/"x.csv"; p.write_text("timestamp_ms,open,high,low,close\n1,10,11,9,10\n",encoding="utf8")
