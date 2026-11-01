@@ -42,6 +42,8 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         entry=entry_tf[-1].close
         vol=atr(entry_tf,14)
         swings=h1["swings"]
+        # Estimated round-trip fee and slippage for the minimum net-RR gate.
+        round_trip_cost=entry*.0014
         if side=="LONG":
             structural=[x["price"] for x in swings if x["kind"]=="LOW" and x["index"]<len(entry_tf)-1 and x["price"]<entry]
             if not structural: raise ValueError("No confirmed 1H swing low for structural invalidation")
@@ -54,8 +56,6 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
             stop=max(structural[-3:])+.10*vol
             if not stop>entry: raise ValueError("Short structural stop is not above entry")
             risk=stop-entry; target=entry-(3*risk+4*round_trip_cost)
-        # Conservative placeholder round-trip cost; configure actual fee/slippage in backtest execution.
-        round_trip_cost=entry*.0014
         net_loss=risk+round_trip_cost
         net_gain=3*risk-round_trip_cost
         rr=net_gain/net_loss if net_loss>0 else 0
