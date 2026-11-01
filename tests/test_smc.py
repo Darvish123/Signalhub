@@ -26,7 +26,7 @@ class SMCTests(unittest.TestCase):
         rows[-1]=c(7,9.5,10,9,9.5)
         self.assertEqual(premium_discount(rows,swings)["zone"],"DISCOUNT")
     def test_order_block_mitigation(self):
-        rows=[c(0,10,11,9,10),c(1,10,12,9,11),c(2,11,12,10,11),
+        rows=[c(0,10,11,9,10),c(1,10,12,9,11),c(2,11,12,10,10.5),
               c(3,11,12,10,11),c(4,11,12,9.5,10.5),c(5,10.5,11,8,8.5)]
         event=StructureEvent(3,rows[3].time_ms,"BOS","BULLISH",11.5,12)
         ob=order_blocks(rows,[event],lookback=3)[0]
