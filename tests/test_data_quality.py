@@ -13,6 +13,9 @@ class FreshnessTests(unittest.TestCase):
     def test_rejects_large_gap(self):
         rows=self.rows(); rows[2]=Candle(rows[1].time_ms+2_000_000,10,11,9,10,100,1)
         with self.assertRaises(ExchangeError): validate_fresh_candles(rows,"15m",now_ms=rows[-1].time_ms)
+    def test_rejects_unaligned_timestamps(self):
+        rows=self.rows(); rows[1]=Candle(rows[1].time_ms+1,10,11,9,10,100,1)
+        with self.assertRaises(ExchangeError): validate_fresh_candles(rows,"15m",now_ms=rows[-1].time_ms)
     def test_rejects_future_series(self):
         rows=self.rows()
         with self.assertRaises(ExchangeError): validate_fresh_candles(rows,"15m",now_ms=rows[-1].time_ms-2_000_000)
