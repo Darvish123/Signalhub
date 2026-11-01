@@ -56,6 +56,14 @@ def stats(trades:list[Trade],start_ms:int,end_ms:int,initial_equity:float=10000)
       "longs":sum(t.side=="LONG" for t in trades),"shorts":sum(t.side=="SHORT" for t in trades),
       "exit_reasons":{k:sum(t.exit_reason==k for t in trades) for k in ("STOP","TARGET","TIME")}}
 
+def position_fraction_for_risk(entry:float,stop:float,risk_pct:float,max_leverage:float=1.0)->float:
+    """Return notional/equity fraction for a risk budget, capped by leverage."""
+    if entry<=0 or not 0<risk_pct<=2 or not 0<max_leverage<=5:
+        raise ValueError("Invalid entry/risk/leverage")
+    distance=abs(entry-stop)/entry
+    if distance<=0: raise ValueError("Entry and stop must differ")
+    return min(max_leverage,(risk_pct/100)/distance)
+
 def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps:float=5.,slippage_bps:float=2.,risk_pct:float=0.5,max_hold_bars:int=192,max_leverage:float=1.0)->dict:
     if fee_bps<0 or slippage_bps<0 or not 0<risk_pct<=2 or max_hold_bars<1 or not 0<max_leverage<=5: raise ValueError("Invalid cost/risk/holding configuration")
     h1=aggregate(candles,3600000); h4=aggregate(candles,14400000)
@@ -87,9 +95,8 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         exit_price*=1-cost_rate if side=="LONG" else 1+cost_rate
         gross=((exit_price-entry)/entry*100) if side=="LONG" else ((entry-exit_price)/entry*100)
         net=gross
-        stop_distance=abs(entry-stop)/entry
         # Risk-budget sizing: notional fraction is capped by max_leverage (1.0 = unlevered).
-        position_fraction=min(max_leverage,(risk_pct/100)/stop_distance) if stop_distance>0 else 0.0
+        position_fraction=position_fraction_for_risk(entry,stop,risk_pct,max_leverage)
         equity_pnl_pct=net*position_fraction
         trades.append(Trade(symbol,side,now,entry_bar.time_ms,candles[exit_idx].time_ms,round(entry,10),round(exit_price,10),stop,target,round(gross,5),round(net,5),reason,exit_idx-i,round(position_fraction,6),round(equity_pnl_pct,6)))
         i=exit_idx+1
