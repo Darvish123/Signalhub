@@ -6,7 +6,6 @@ Only confirmed pivots are used for structure; FVGs and sweeps are candle-pattern
 from dataclasses import asdict, dataclass
 from typing import Literal
 from app.models import Candle
-from app.analysis import pivots
 
 @dataclass(frozen=True)
 class Swing:
@@ -56,14 +55,14 @@ class OrderBlock:
 def confirmed_swings(candles: list[Candle], left: int = 3, right: int = 3) -> list[Swing]:
     if left < 1 or right < 1:
         raise ValueError("left and right must be >= 1")
-    highs, lows = pivots(candles, left, right)
-    # Map pivot prices back to their candle indices; preserve chronological order.
     result: list[Swing] = []
     for i in range(left, len(candles) - right):
         c = candles[i]
-        if c.high in highs:
+        is_high = all(c.high > candles[j].high for j in range(i-left, i)) and all(c.high >= candles[j].high for j in range(i+1, i+right+1))
+        is_low = all(c.low < candles[j].low for j in range(i-left, i)) and all(c.low <= candles[j].low for j in range(i+1, i+right+1))
+        if is_high:
             result.append(Swing(i, c.time_ms, c.high, "HIGH", ""))
-        if c.low in lows:
+        if is_low:
             result.append(Swing(i, c.time_ms, c.low, "LOW", ""))
     result.sort(key=lambda x: (x.index, x.kind))
     last_high = last_low = None
