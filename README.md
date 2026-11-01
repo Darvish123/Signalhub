@@ -1,29 +1,17 @@
-# SignalHub — Bitunix Market Intelligence MVP 0.2
+# SignalHub — Bitunix Futures Research MVP 0.3
 
-Read-only Bitunix Futures market analysis. Version 0.2 adds a deterministic Smart Money Concepts (SMC) indicator layer alongside the original 4h/1h/15m EMA/ATR screening engine.
+Read-only market research and signal-candidate screening. No private credentials, order placement, withdrawals or automated execution.
 
-**No live order placement, private API keys, or withdrawal/trading permissions.** This is an engineering/research tool, not a proven profitable strategy or investment advice.
+## Capabilities
+- Public Bitunix Futures tickers and OHLCV candles.
+- Bounded scan of up to 20 liquid USDT perpetuals.
+- Multi-timeframe filter: 4h EMA regime, 1h alignment, 15m momentum and ATR volatility guard.
+- Structural pivot-based stop/target candidates and estimated RR.
+- SMC context: confirmed swings/HH-HL-LH-LL, BOS/CHoCH, single-consumption liquidity sweep events, three-candle FVG, Order Block candidate with mitigation/invalidation lifecycle, and Premium/Discount from the latest adjacent confirmed opposite swing pair.
+- SQLite signal history, FastAPI docs, Docker and CI.
 
-## SMC indicator definitions
-
-- **Confirmed swing high/low:** local extremum with configurable left/right candles. A pivot is only known after the right-side confirmation candles close.
-- **HH / LH / HL / LL:** each confirmed swing high is compared with the previous confirmed high; each swing low with the previous confirmed low.
-- **BOS:** candle close beyond the latest eligible confirmed swing level in the current/initial direction.
-- **CHoCH:** close-based break against the previously detected structure direction. The first detected break is labelled BOS because no prior trend is known.
-- **Liquidity sweep:** wick trades beyond a prior confirmed swing level and the candle closes back inside that level.
-- **FVG:** three-candle gap; bullish when candle 3 low is above candle 1 high, bearish when candle 3 high is below candle 1 low.
-- **Order block:** last opposite-colour candle within a configurable lookback before a detected BOS/CHoCH. This is a heuristic; mitigation lifecycle is not yet tracked.
-- **Premium / Discount:** current close compared with the midpoint of the latest available confirmed swing high/low range.
-
-These are explicit candle-derived heuristics. They do not identify actual institutional participants, resting orders, intent, or guaranteed support/resistance. SMC outputs are context for human review, not standalone entry instructions.
-
-## Included
-- Public Futures tickers and historical candles.
-- Bounded universe scan of up to 20 liquid USDT perpetuals (default 10).
-- 4h regime, 1h alignment, 15m momentum confirmation.
-- EMA trend, ATR volatility guard, confirmed swing pivots, structural SL/TP candidates.
-- SMC indicator module: structure labels/events, sweeps, FVGs, order-block candidates, premium/discount.
-- SQLite history, FastAPI, Docker and CI unit tests.
+## SMC definitions and limitations
+All SMC labels are deterministic candle heuristics, not proof of institutional orders or intent. Pivots become available only after right-side confirmation candles. BOS/CHoCH are close-based breaks without displacement validation. Sweeps consume a pivot after first sweep. FVGs are geometric gaps, not automatic entries. OB mitigation means a later candle overlaps the zone; invalidation means a close beyond its distal boundary. OB selection remains heuristic and does not yet require displacement/FVG confluence. Premium/Discount uses an adjacent confirmed high/low pair and is not a fully modelled dealing-range/leg algorithm.
 
 ## Run
 ```bash
@@ -33,36 +21,38 @@ pip install -r requirements.txt
 cp .env.example .env
 uvicorn app.main:app --reload
 ```
-Open http://127.0.0.1:8000/docs and /health.
+Open http://127.0.0.1:8000/docs.
 
 ## Endpoints
 - GET /health
 - GET /v1/market/tickers
-- GET /v1/market/klines/BTCUSDT?interval=15m&limit=100
-- GET /v1/analysis/smc/BTCUSDT?interval=15m&limit=200 — SMC indicator snapshot
-- POST /v1/scan/BTCUSDT — scan one contract
-- POST /v1/scan?limit=10 — scan most liquid eligible USDT perpetuals
+- GET /v1/market/klines/{symbol}?interval=15m&limit=100
+- GET /v1/analysis/smc/{symbol}?interval=15m&limit=200
+- POST /v1/scan/{symbol}
+- POST /v1/scan?limit=10
 - GET /v1/signals
 - GET /v1/signals/{id}
 
-Run read-only live API smoke test: `python -m scripts.smoke`.
-Tests: `python -m unittest discover -s tests -v`.
+## Data quality controls
+- OHLCV values must be finite and valid; timestamps must be unique and ordered.
+- Scan/SMC analysis rejects stale/future candle series and gaps larger than 1.5 timeframe intervals.
+- Freshness thresholds are conservative engineering guards, not guarantees that the exchange feed is correct. Historical kline endpoint is intentionally not freshness-filtered.
 
-## Known limitations / safety
-- Live exchange requests have not yet been executed from this environment; run smoke test and inspect CI before relying on output.
-- Strategy is a screening heuristic, not validated alpha. No historical backtest or forward paper-trading evidence.
-- Fee allowance is a placeholder; calibrate actual fees, spread and slippage. Funding is excluded.
-- No OI/funding/liquidation/order-book filters, portfolio risk sizing, dashboard, alerts, authentication, or trade lifecycle.
-- Spot is not integrated into scanner. No order endpoint exists.
-- SMC rules are initial, deterministic definitions. They need replay/backtest validation, edge-case review and market/timeframe calibration.
-- **Do not expose this unauthenticated API publicly.** Run locally or behind a trusted private network until authentication and deployment hardening are added.
+## Validation and known limitations
+- Run `python -m unittest discover -s tests -v` and `python -m scripts.smoke` (read-only) before local use.
+- CI passing only verifies tests/compilation; it does not prove profitability or validate live Bitunix compatibility.
+- Strategy remains a screening heuristic. No historical backtest, walk-forward test or forward paper-trading evidence.
+- Fee model is still a placeholder; spread, slippage, actual fee tier and funding are not modelled.
+- No OI, funding, liquidation, order-book, portfolio risk sizing, aggregate exposure, dashboard, alerts, authentication or trade lifecycle.
+- Spot is not integrated. No order endpoint exists.
+- Do not expose this unauthenticated API publicly; use locally or behind a trusted private network.
 
-## Next milestones
-1. Validate live API payloads, timestamps and rate limits.
-2. Add SMC confluence scoring only after objective definitions and tests are reviewed.
-3. Add walk-forward backtest with fees/spread/slippage/funding.
-4. Add forward paper trading, sizing and portfolio exposure.
-5. Add auth, dashboard, alerts, monitoring and deployment.
-6. Add a separately validated Spot engine.
-
-Never enable automated execution without separate review and explicit approval.
+## Next gates before any trading consideration
+1. Verify live public API payloads, candle timestamp semantics, rate limits and reconnect behaviour.
+2. Add OB displacement/imbalance validation and coherent external/internal dealing ranges.
+3. Integrate SMC confluence only after objective definitions and out-of-sample tests.
+4. Build event-driven backtest with fees, spread, slippage and funding.
+5. Run forward paper trading, track signal lifecycle and report drawdown/expectancy.
+6. Add sizing, portfolio exposure/correlation limits, auth, monitoring, alerts and UI.
+7. Validate Spot in a separate engine.
+No automated execution without separate security, risk and user approval.
