@@ -4,10 +4,11 @@ from app.analysis import atr,ema
 from app.models import Candle,Signal
 from app.smc import analyse_smc
 from app.ict import analyse_ict
+from app.price_action import analyse_price_action
 
 def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_tf:list[Candle],
             min_score:int=70,min_rr:float=3.,min_quote_volume:float=1_000_000,
-            round_trip_cost_bps:float=14., ict_require_killzone:bool=False, now_ms:int|None=None)->Signal:
+            round_trip_cost_bps:float=14., ict_require_killzone:bool=False, now_ms:int|None=None, lower_tf:list[Candle]|None=None)->Signal:
     now_ms=now_ms or int(time.time()*1000)
     if min_quote_volume<0 or round_trip_cost_bps<0 or min_rr<=0:
         raise ValueError("Invalid strategy cost, volume or RR configuration")
@@ -44,6 +45,18 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
             return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                           risks=[ict.get("reason","ICT sequence not confirmed")],**base)
         ict_setup=ict["setup"]; tap=entry_tf[-1]
+        pa_setup=None
+        if lower_tf is not None:
+            if len(lower_tf)<20 or any(not c.valid() for c in lower_tf) or any(y.time_ms<=x.time_ms for x,y in zip(lower_tf,lower_tf[1:])):
+                raise ValueError("15m Price Action input is insufficient, invalid or non-chronological")
+            if lower_tf[-1].time_ms+900000>now_ms:
+                raise ValueError("Latest 15m Price Action candle is not fully closed")
+            pa=analyse_price_action(lower_tf[-200:],direction=side)
+            if pa["status"]!="TRIGGER_CONFIRMED":
+                return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
+                              risks=[pa.get("reason","No aligned 15m Price Action trigger")],**base)
+            pa_setup=pa["trigger"]
+            score+=10; reasons.append(f"15m Price Action trigger confirmed: {pa_setup['pattern']}")
         # A valid OB is a confluence zone only when it overlaps the actual ICT retracement.
         matching_obs=[ob for ob in h1["order_blocks"] if ob["direction"]==direction and
                       ob["mitigation"]!="INVALIDATED" and ob["index"]<ict_setup["tap_index"] and
@@ -59,13 +72,13 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         if side=="LONG":
             structural=[x["price"] for x in swings if x["kind"]=="LOW" and x["index"]<len(entry_tf)-1 and x["price"]<entry]
             if not structural: raise ValueError("No confirmed 1H swing low for structural invalidation")
-            stop=min(min(structural[-3:]),ict_setup["sweep_extreme"])-.10*vol
+            stop=min(min(structural[-3:]),ict_setup["sweep_extreme"],pa_setup["invalidation"] if pa_setup else float("inf"))-.10*vol
             if not stop<entry: raise ValueError("Long structural stop is not below entry")
             risk=entry-stop; target=entry+(3*risk+4*round_trip_cost)
         else:
             structural=[x["price"] for x in swings if x["kind"]=="HIGH" and x["index"]<len(entry_tf)-1 and x["price"]>entry]
             if not structural: raise ValueError("No confirmed 1H swing high for structural invalidation")
-            stop=max(max(structural[-3:]),ict_setup["sweep_extreme"])+.10*vol
+            stop=max(max(structural[-3:]),ict_setup["sweep_extreme"],pa_setup["invalidation"] if pa_setup else float("-inf"))+.10*vol
             if not stop>entry: raise ValueError("Short structural stop is not above entry")
             risk=stop-entry; target=entry-(3*risk+4*round_trip_cost)
         net_loss=risk+round_trip_cost; net_gain=3*risk+3*round_trip_cost

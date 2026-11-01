@@ -41,9 +41,15 @@ async def scan_one(symbol:str):
     regime,setup,entry=await asyncio.gather(
         client.futures_klines(symbol,"1d",100),
         client.futures_klines(symbol,"4h",100),
-        client.futures_klines(symbol,"1h",200))
+        client.futures_klines(symbol,"1h",200),
+        client.futures_klines(symbol,"15m",200))
     for candles,tf in ((regime,"1d"),(setup,"4h"),(entry,"1h")): validate_fresh_candles(candles,tf)
-    result=analyse(symbol,"FUTURES",regime,setup,entry,settings.min_score,settings.min_net_rr,settings.min_quote_volume_24h)
+    lower=await client.futures_klines(symbol,"15m",200)
+    validate_fresh_candles(lower,"15m")
+    now_ms=__import__("time").time_ns()//1_000_000
+    lower=[c for c in lower if c.time_ms+900000<=now_ms]
+    result=analyse(symbol,"FUTURES",regime,setup,entry,settings.min_score,3.0,
+                   settings.min_quote_volume_24h,now_ms=now_ms,lower_tf=lower)
     return {"id":store.save(result),**result.to_dict()}
 
 @app.post("/v1/scan/{symbol}")
