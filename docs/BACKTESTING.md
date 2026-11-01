@@ -46,3 +46,20 @@ python -m scripts.run_portfolio_backtest \
 ```
 
 The portfolio engine generates each symbol's closed-candle candidate trades, merges entries by timestamp, then allocates against one shared account. Default caps of five simultaneous positions and 2% aggregate open stop-risk are conservative engineering defaults, not user-validated optimal parameters. PnL is applied to the shared equity using the equity committed when each trade was opened. Positions rejected by the concurrency or open-risk cap are reported separately. This first portfolio version does not model cross-symbol correlation, liquidation, maintenance margin, exchange portfolio margin, or intrabar order contention; these remain explicit limitations and must be addressed before treating the simulation as production-grade.
+
+## ICT integration
+
+The ICT implementation is in `app/ict.py`. It is a native deterministic OHLC implementation, not copied third-party source. Its entry sequence is deliberately strict:
+
+1. A confirmed swing liquidity level is swept and the candle closes back inside.
+2. Within eight bars, price closes through the relevant confirmed structure level.
+3. The MSS candle must meet the displacement thresholds (body at least 1.2 ATR and body/range at least 0.60).
+4. A same-direction three-candle FVG must form at/adjacent to the MSS.
+5. Price must subsequently retrace into the FVG, and the latest closed candle must be that tap.
+6. The stop is placed beyond the sweep extreme and a 0.10 ATR buffer; the existing minimum 3R net cost gate remains in force.
+
+OTE, premium/discount and NY killzone are confluence metadata rather than mandatory gates by default. Enable `ict_require_killzone=True` only for a separately tested session-specific experiment. London is 02:00-05:00 New York time, NY AM 07:00-10:00, NY PM 13:00-16:00; DST is handled by the standard timezone database. Crypto is 24/7, so off-session trades are not automatically rejected.
+
+The public scan now requests 1D/4H/1H candles to match the strategy contract; the former 4H/1H/15m request did not match the strategy's declared 1D/4H/1H input semantics.
+
+ICT terminology is not a claim that institutional orders can be identified from OHLC. See the concept references used for the rule definitions: https://github.com/SrsBlack/ict-knowledge-library and https://ictradingconcepts.com/ict/market-structure-shift/.
