@@ -14,5 +14,5 @@ class CoreTests(unittest.TestCase):
  def test_storage(self):
   with tempfile.TemporaryDirectory() as d:
    db=SignalStore(d+"/db.sqlite"); s=Signal("BTCUSDT","FUTURES","NONE","NO_TRADE",0,None,None,None,None,None,["test"],[],123)
-   self.assertEqual(db.latest(1),[]); self.assertEqual(db.save(s),1); self.assertEqual(db.latest(1)[0]["symbol"],"BTCUSDT")
+   self.assertEqual(db.latest(1),[]); signal_id=db.save(s); self.assertEqual(signal_id,1); self.assertEqual(db.latest(1)[0]["symbol"],"BTCUSDT"); self.assertEqual(db.get(signal_id)["symbol"],"BTCUSDT"); self.assertTrue(db.check()); self.assertIsNone(db.get(999))
 if __name__=="__main__": unittest.main()
