@@ -21,14 +21,14 @@ class ICTTests(unittest.TestCase):
 
 
     def test_complete_sweep_mss_fvg_retracement_sequence(self):
-        rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(21)]
+        rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(40)]
         rows[5]=Candle(5*3600000,100,105,99,104,1000,10)
         rows[10]=Candle(10*3600000,100,101,95,96,1000,10)
         rows[15]=Candle(15*3600000,98,100,94,96,1000,10)
         rows[18]=Candle(18*3600000,103,110,102,109,1000,10)
-        for i in list(range(19,20)):
+        for i in list(range(19,39)):
             rows[i]=Candle(i*3600000,100,100.5,99,100,1000,10)
-        rows[20]=Candle(20*3600000,103,104,100.5,102.5,1000,10)
+        rows[39]=Candle(39*3600000,103,104,100.5,102.5,1000,10)
         smc=analyse_smc(rows)
         self.assertTrue(any(x["direction"]=="BULLISH" and x["index"]==15 for x in smc["liquidity_sweeps"]),smc["liquidity_sweeps"])
         self.assertTrue(any(x["direction"]=="BULLISH" and x["index"]==18 for x in smc["structure_events"]),smc["structure_events"])
@@ -38,7 +38,7 @@ class ICTTests(unittest.TestCase):
         self.assertEqual(result["setup"]["direction"],"LONG")
         self.assertEqual(result["setup"]["sweep_index"],15)
         self.assertEqual(result["setup"]["mss_index"],18)
-        self.assertEqual(result["setup"]["tap_index"],20)
+        self.assertEqual(result["setup"]["tap_index"],39)
 
     def test_invalid_direction_is_rejected(self):
         rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(50)]
