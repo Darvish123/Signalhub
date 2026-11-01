@@ -1,0 +1,121 @@
+name: Bitunix Direct Candle Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "Market symbol"
+        required: true
+        default: "BTCUSDT"
+      interval:
+        description: "Candle interval"
+        required: true
+        type: choice
+        options:
+          - 15m
+          - 5m
+          - 1h
+          - 4h
+          - 1d
+        default: "15m"
+      limit:
+        description: "Number of candles to request (max 200)"
+        required: true
+        default: "10"
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-direct-candles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch raw candles directly from Bitunix
+        id: fetch
+        env:
+          SYMBOL: ${{ inputs.symbol }}
+          INTERVAL: ${{ inputs.interval }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          import requests
+
+          symbol = os.environ["SYMBOL"].strip().upper()
+          interval = os.environ["INTERVAL"].strip()
+          limit = int(os.environ["LIMIT"])
+          output = {
+              "test_time_utc": datetime.now(timezone.utc).isoformat(),
+              "symbol": symbol,
+              "interval": interval,
+              "requested_limit": limit,
+              "price_type": "LAST_PRICE",
+          }
+
+          if not (1 <= limit <= 200):
+              output["error"] = "limit must be between 1 and 200"
+              Path("bitunix_result.json").write_text(
+                  json.dumps(output, indent=2), encoding="utf-8"
+              )
+              print(json.dumps(output, indent=2))
+              sys.exit(1)
+
+          url = "https://fapi.bitunix.com/api/v1/futures/market/kline"
+          params = {
+              "symbol": symbol,
+              "interval": interval,
+              "limit": limit,
+              "type": "LAST_PRICE",
+          }
+
+          try:
+              response = requests.get(url, params=params, timeout=25)
+              output["request_url"] = response.url
+              output["http_status"] = response.status_code
+              output["response_headers"] = {
+                  k: v for k, v in response.headers.items()
+                  if k.lower() in ("content-type", "date")
+              }
+              try:
+                  payload = response.json()
+              except ValueError:
+                  payload = {"raw_text": response.text[:20000]}
+
+              output["raw_response"] = payload
+              output["http_ok"] = response.ok
+              Path("bitunix_result.json").write_text(
+                  json.dumps(output, ensure_ascii=False, indent=2),
+                  encoding="utf-8",
+              )
+              print(json.dumps(output, ensure_ascii=False, indent=2)[:12000])
+              if not response.ok:
+                  sys.exit(1)
+          except requests.RequestException as exc:
+              output["network_error"] = repr(exc)
+              Path("bitunix_result.json").write_text(
+                  json.dumps(output, ensure_ascii=False, indent=2),
+                  encoding="utf-8",
+              )
+              print(json.dumps(output, ensure_ascii=False, indent=2))
+              sys.exit(1)
+          PY
+
+      - name: Upload raw API response
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitunix-direct-candle-result
+          path: bitunix_result.json
+          if-no-files-found: warn
+          retention-days: 7
