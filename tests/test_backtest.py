@@ -1,5 +1,6 @@
 import unittest
-from app.models import Candle
+from unittest.mock import patch
+from app.models import Candle,Signal
 from app.backtest import aggregate,run_backtest,position_fraction_for_risk
 from app.funding import FundingRate
 class BacktestTests(unittest.TestCase):
@@ -17,4 +18,22 @@ class BacktestTests(unittest.TestCase):
   result=run_backtest(rows,"TESTUSDT",rows[1500].time_ms,rows[-1].time_ms,funding_rates=rates)
   self.assertEqual(result["initial_equity"],100.)
   self.assertEqual(result["funding_settlements_in_test_window"],1)
+
+ def test_funding_is_applied_to_a_position_open_at_settlement(self):
+  rows=[Candle(i*3600000,100,100.5,99.5,100,1000,10) for i in range(1700)]
+  start=rows[1500].time_ms
+  signal=Signal(symbol="TESTUSDT",market="FUTURES",side="LONG",status="CANDIDATE",
+      score=90,entry=100,stop_loss=98,take_profit_1=107,take_profit_2=107,
+      net_rr=3.1,reasons=[],risks=[],created_at_ms=start)
+  rate=FundingRate(rows[1508].time_ms+1,.001,100)
+  no_trade=Signal(symbol="TESTUSDT",market="FUTURES",side="NONE",status="NO_TRADE",
+      score=0,entry=None,stop_loss=None,take_profit_1=None,take_profit_2=None,
+      net_rr=None,reasons=[],risks=[],created_at_ms=start)
+  with patch("app.backtest.analyse",side_effect=[signal]+[no_trade for _ in range(20)]):
+   result=run_backtest(rows,"TESTUSDT",start,rows[-1].time_ms,
+                       funding_rates=[rate],max_hold_bars=24)
+  self.assertGreaterEqual(len(result["trades"]),1)
+  self.assertLess(result["trades"][0]["funding_pnl_pct_equity"],0)
+  self.assertEqual(result["trades"][0]["exit_reason"],"TIME")
+
 if __name__=="__main__": unittest.main()
