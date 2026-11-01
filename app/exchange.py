@@ -4,7 +4,13 @@ from typing import Any
 import httpx
 from app.models import Candle
 class ExchangeError(RuntimeError): pass
-class InvalidMarketDataError(ExchangeError): pass
+class InvalidMarketDataError(ExchangeError):
+    def __init__(self, symbol: str, interval: str, total: int, invalid: list[dict[str, Any]]):
+        self.symbol = symbol
+        self.interval = interval
+        self.total = total
+        self.invalid = invalid
+        super().__init__(f"{len(invalid)} of {total} candles failed OHLCV validation for {symbol} {interval}")
 INTERVAL_MS={"5m":300000,"15m":900000,"1h":3600000,"4h":14400000,"1d":86400000}
 def validate_fresh_candles(candles:list[Candle],interval:str,now_ms:int|None=None,max_age_intervals:float=2.5)->None:
     if interval not in INTERVAL_MS: raise ValueError("Unsupported interval")
@@ -42,17 +48,22 @@ class BitunixClient:
         d=await self._get(f"{self.futures_base}/api/v1/futures/market/kline",{"symbol":symbol,"interval":interval,"limit":min(max(limit,20),200)})
         if not isinstance(d,list) or not d: raise ExchangeError(f"No candles for {symbol} {interval}")
         out=[]
+        invalid=[]
         for x in d:
-            try: c=Candle(int(x["time"]),float(x["open"]),float(x["high"]),float(x["low"]),float(x["close"]),float(x.get("quoteVol") or 0),float(x.get("baseVol") or 0))
-            except (KeyError,TypeError,ValueError) as e: raise ExchangeError(f"Malformed candle: {e}") from e
+            try:
+                c=Candle(int(x["time"]),float(x["open"]),float(x["high"]),float(x["low"]),float(x["close"]),float(x.get("quoteVol") or 0),float(x.get("baseVol") or 0))
+            except (KeyError,TypeError,ValueError) as exc:
+                raise ExchangeError(f"Malformed candle: {exc}") from exc
             if not c.valid():
-                raise InvalidMarketDataError(
-                    "Invalid OHLCV candle: "
-                    f"time={c.time_ms}, open={c.open}, high={c.high}, "
-                    f"low={c.low}, close={c.close}, "
-                    f"quote_volume={c.quote_volume}, base_volume={c.base_volume}"
-                )
+                invalid.append({
+                    "time_ms": c.time_ms, "open": c.open, "high": c.high,
+                    "low": c.low, "close": c.close,
+                    "quote_volume": c.quote_volume, "base_volume": c.base_volume,
+                    "reason": "OHLCV invariant failed",
+                })
             out.append(c)
+        if invalid:
+            raise InvalidMarketDataError(symbol, interval, len(d), invalid)
         out.sort(key=lambda x:x.time_ms)
         if len({x.time_ms for x in out})!=len(out): raise ExchangeError("Duplicate candle timestamps")
         return out
