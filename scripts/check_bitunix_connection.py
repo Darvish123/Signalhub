@@ -4,7 +4,7 @@ import json
 import time
 
 from app.config import settings
-from app.exchange import BitunixClient, validate_fresh_candles
+from app.exchange import BitunixClient, InvalidMarketDataError, validate_fresh_candles
 
 
 async def main() -> int:
@@ -34,6 +34,18 @@ async def main() -> int:
             "trading_enabled": False,
         }, indent=2))
         return 0
+    except InvalidMarketDataError as exc:
+        print(json.dumps({
+            "status": "API_REACHABLE_DATA_INVALID",
+            "mode": "public_read_only",
+            "base_url": settings.bitunix_futures_base_url,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "hint": "The public endpoint responded, but at least one market-data candle failed OHLCV validation. Raw values were not modified or silently discarded.",
+            "private_api_tested": False,
+            "trading_enabled": False,
+        }, indent=2))
+        return 1
     except Exception as exc:
         print(json.dumps({
             "status": "CONNECTION_FAILED",
