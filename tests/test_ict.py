@@ -33,7 +33,7 @@ class ICTTests(unittest.TestCase):
         self.assertTrue(any(x["direction"]=="BULLISH" and x["index"]==15 for x in smc["liquidity_sweeps"]),smc["liquidity_sweeps"])
         self.assertTrue(any(x["direction"]=="BULLISH" and x["index"]==18 for x in smc["structure_events"]),smc["structure_events"])
         self.assertTrue(any(x["direction"]=="BULLISH" and x["index"]==18 for x in smc["fair_value_gaps"]),smc["fair_value_gaps"])
-        result=analyse_ict(rows,direction="LONG")
+        result=analyse_ict(rows,direction="LONG",max_mss_to_tap=25)
         self.assertEqual(result["status"],"ICT_CONFIRMED",result)
         self.assertEqual(result["setup"]["direction"],"LONG")
         self.assertEqual(result["setup"]["sweep_index"],15)
