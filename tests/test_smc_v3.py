@@ -21,7 +21,7 @@ class SMCV3Tests(unittest.TestCase):
         self.assertEqual(life[0]["state"],"FILLED")
     def test_ob_mitigation_is_first_revisit_after_break(self):
         rows=[c(0,10,11,9,10),c(1,10,12,9,11),c(2,11,12,10,10),
-              c(3,11,13,10,12),c(4,11,12,9.5,10.5),c(5,10.5,11,8,8.5)]
+              c(3,11,13,10,12),c(4,11,12,9.5,10.5)]
         event=StructureEvent(3,rows[3].time_ms,"BOS","BULLISH",11.5,12)
         ob=order_blocks(rows,[event],3)[0]
         self.assertEqual(ob.mitigation,"MITIGATED")

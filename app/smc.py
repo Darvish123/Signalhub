@@ -150,12 +150,17 @@ def order_blocks(candles:list[Candle],events:list[StructureEvent]|None=None,look
             (candles[j].close<candles[j].open if event.direction=="BULLISH" else candles[j].close>candles[j].open)),None)
         if j is None: continue
         origin=candles[j]; status="UNMITIGATED"; mitigation_index=None
+        first_touch=None
         for k in range(event.index+1,len(candles)):
             x=candles[k]
             invalid=(event.direction=="BULLISH" and x.close<origin.low) or (event.direction=="BEARISH" and x.close>origin.high)
             touched=x.low<=origin.high and x.high>=origin.low
-            if invalid: status="INVALIDATED"; mitigation_index=k; break
-            if touched: status="MITIGATED"; mitigation_index=k; break
+            if invalid:
+                status="INVALIDATED"; mitigation_index=k; break
+            if touched and first_touch is None:
+                first_touch=k
+        if status!="INVALIDATED" and first_touch is not None:
+            status="MITIGATED"; mitigation_index=first_touch
         out.append(OrderBlock(j,origin.time_ms,event.direction,origin.low,origin.high,status,mitigation_index))
     return out
 
