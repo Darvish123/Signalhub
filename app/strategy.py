@@ -3,10 +3,11 @@ import time
 from app.analysis import atr,ema
 from app.models import Candle,Signal
 from app.smc import analyse_smc
+from app.ict import analyse_ict
 
 def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_tf:list[Candle],
             min_score:int=70,min_rr:float=3.,min_quote_volume:float=1_000_000,
-            round_trip_cost_bps:float=14., now_ms:int|None=None)->Signal:
+            round_trip_cost_bps:float=14., ict_require_killzone:bool=False, now_ms:int|None=None)->Signal:
     now_ms=now_ms or int(time.time()*1000)
     if min_quote_volume<0 or round_trip_cost_bps<0 or min_rr<=0:
         raise ValueError("Invalid strategy cost, volume or RR configuration")
@@ -40,7 +41,15 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         if not events or not (sweeps or gaps):
             return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                           risks=["1H trigger needs aligned BOS/CHoCH plus liquidity sweep or FVG"],**base)
-        score+=20; reasons.append("1H SMC entry confirmation: structure + sweep/FVG")
+        score+=10; reasons.append("1H SMC entry confirmation: aligned structure + sweep/FVG")
+        ict=analyse_ict(entry_tf[-200:],direction=side,require_killzone=ict_require_killzone)
+        if ict["status"]!="ICT_CONFIRMED":
+            return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
+                          risks=[ict.get("reason","ICT sequence not confirmed")],**base)
+        ict_setup=ict["setup"]
+        score+=20
+        reasons.append("ICT sequence confirmed: sweep -> displacement MSS -> FVG retracement")
+        reasons.append(f"ICT confluence: OTE={ict_setup['in_ote']}, PD={ict_setup['premium_discount']}, killzone={ict_setup['killzone'] or 'outside'}")
         entry=entry_tf[-1].close
         vol=atr(entry_tf,14)
         swings=h1["swings"]
@@ -49,13 +58,13 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         if side=="LONG":
             structural=[x["price"] for x in swings if x["kind"]=="LOW" and x["index"]<len(entry_tf)-1 and x["price"]<entry]
             if not structural: raise ValueError("No confirmed 1H swing low for structural invalidation")
-            stop=min(structural[-3:])-.10*vol
+            stop=min(min(structural[-3:]),ict_setup["sweep_extreme"])-.10*vol
             if not stop<entry: raise ValueError("Long structural stop is not below entry")
             risk=entry-stop; target=entry+(3*risk+4*round_trip_cost)
         else:
             structural=[x["price"] for x in swings if x["kind"]=="HIGH" and x["index"]<len(entry_tf)-1 and x["price"]>entry]
             if not structural: raise ValueError("No confirmed 1H swing high for structural invalidation")
-            stop=max(structural[-3:])+.10*vol
+            stop=max(max(structural[-3:]),ict_setup["sweep_extreme"])+.10*vol
             if not stop>entry: raise ValueError("Short structural stop is not above entry")
             risk=stop-entry; target=entry-(3*risk+4*round_trip_cost)
         net_loss=risk+round_trip_cost
@@ -63,7 +72,7 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         rr=net_gain/net_loss if net_loss>0 else 0
         if rr<min_rr: return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                                     risks=[f"Net RR {rr:.3f} below required {min_rr:.2f}"],**base)
-        score+=20; reasons.append("Structural invalidation stop and minimum net RR passed")
+        score+=10; reasons.append("Structural invalidation stop beyond sweep extreme and minimum net RR passed")
         if entry_tf[-1].quote_volume>=min_quote_volume/24: score+=10
         else: return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                             risks=["1H quote volume below liquidity threshold"],**base)
