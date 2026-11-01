@@ -86,7 +86,8 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         closed1h=candles[:i+1]
         if min(len(closed4),len(closed1d),len(closed1h))<60: i+=1; continue
         sig=analyse(symbol,"FUTURES",closed1d[-160:],closed4[-200:],closed1h[-200:],
-                    min_score=70,min_rr=3.,min_quote_volume=1_000_000,\n                    round_trip_cost_bps=2*(fee_bps+slippage_bps),now_ms=decision)
+                    min_score=70,min_rr=3.,min_quote_volume=1_000_000,
+                    round_trip_cost_bps=2*(fee_bps+slippage_bps),now_ms=decision)
         if sig.status!="CANDIDATE" or sig.side not in ("LONG","SHORT") or None in (sig.stop_loss,sig.take_profit_1):
             i+=1; continue
         entry_bar=candles[i+1]; side=sig.side
