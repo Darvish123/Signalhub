@@ -29,7 +29,7 @@ class BacktestTests(unittest.TestCase):
   no_trade=Signal(symbol="TESTUSDT",market="FUTURES",side="NONE",status="NO_TRADE",
       score=0,entry=None,stop_loss=None,take_profit_1=None,take_profit_2=None,
       net_rr=None,reasons=[],risks=[],created_at_ms=start)
-  with patch("app.backtest.analyse",side_effect=[signal]+[no_trade for _ in range(20)]):
+  with patch("app.backtest.analyse",side_effect=[signal]+[no_trade for _ in range(1000)]):
    result=run_backtest(rows,"TESTUSDT",start,rows[-1].time_ms,
                        funding_rates=[rate],max_hold_bars=24)
   self.assertGreaterEqual(len(result["trades"]),1)
