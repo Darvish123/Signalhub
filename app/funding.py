@@ -17,7 +17,8 @@ async def download_funding(symbol:str,start_ms:int,end_ms:int,base_url:str="http
     async with httpx.AsyncClient(timeout=timeout) as client:
         async def fetch(a:int,b:int,depth:int=0):
             response=await client.get(url,params={"symbol":symbol.upper(),"startTime":a,"endTime":b,"limit":200})
-            response.raise_for_status(); payload=response.json()\n            await asyncio.sleep(.12)  # respect the documented public API request rate
+            response.raise_for_status(); payload=response.json()
+            await asyncio.sleep(.12)  # respect the documented public API request rate
             if not isinstance(payload,dict) or str(payload.get("code")) not in ("0","200"):
                 raise RuntimeError(f"Bitunix funding API error: {payload}")
             rows=payload.get("data")
