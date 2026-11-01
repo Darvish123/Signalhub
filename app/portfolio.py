@@ -59,7 +59,7 @@ def run_portfolio_backtest(
         closing = sorted([x for x in active if x["exit_time_ms"] <= timestamp],
                          key=lambda x: (x["exit_time_ms"], x["symbol"]))
         for trade in closing:
-            pnl = equity * trade["equity_pnl_pct"] / 100.0
+            pnl = trade["portfolio_equity_at_entry"] * trade["equity_pnl_pct"] / 100.0
             equity += pnl
             if pnl > 0:
                 gross_profit += pnl
