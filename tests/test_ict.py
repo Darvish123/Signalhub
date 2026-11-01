@@ -18,6 +18,21 @@ class ICTTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             analyse_ict(rows)
 
+
+    def test_complete_sweep_mss_fvg_retracement_sequence(self):
+        rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(50)]
+        rows[5]=Candle(5*3600000,100,105,99,104,1000,10)
+        rows[10]=Candle(10*3600000,100,101,95,96,1000,10)
+        rows[15]=Candle(15*3600000,98,100,94,96,1000,10)
+        rows[18]=Candle(18*3600000,103,110,102,109,1000,10)
+        rows[20]=Candle(20*3600000,103,104,100.5,102.5,1000,10)
+        result=analyse_ict(rows,direction="LONG")
+        self.assertEqual(result["status"],"ICT_CONFIRMED")
+        self.assertEqual(result["setup"]["direction"],"LONG")
+        self.assertEqual(result["setup"]["sweep_index"],15)
+        self.assertEqual(result["setup"]["mss_index"],18)
+        self.assertEqual(result["setup"]["tap_index"],20)
+
     def test_invalid_direction_is_rejected(self):
         rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(50)]
         with self.assertRaises(ValueError):
