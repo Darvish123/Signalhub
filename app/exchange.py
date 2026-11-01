@@ -1,8 +1,21 @@
 import asyncio
+import time
 from typing import Any
 import httpx
 from app.models import Candle
 class ExchangeError(RuntimeError): pass
+INTERVAL_MS={"5m":300000,"15m":900000,"1h":3600000,"4h":14400000,"1d":86400000}
+def validate_fresh_candles(candles:list[Candle],interval:str,now_ms:int|None=None,max_age_intervals:float=2.5)->None:
+    if interval not in INTERVAL_MS: raise ValueError("Unsupported interval")
+    if not candles: raise ExchangeError("Empty candle series")
+    step=INTERVAL_MS[interval]; now_ms=now_ms or int(time.time()*1000)
+    if any(b.time_ms<=a.time_ms for a,b in zip(candles,candles[1:])):
+        raise ExchangeError("Candle timestamps must be strictly increasing")
+    if any(b.time_ms-a.time_ms>step*1.5 for a,b in zip(candles,candles[1:])):
+        raise ExchangeError("Candle series contains a time gap larger than 1.5 intervals")
+    age=now_ms-candles[-1].time_ms
+    if age < -step or age > step*max_age_intervals:
+        raise ExchangeError(f"Stale or future candle data: last candle age {age} ms")
 class BitunixClient:
     """Public read-only Bitunix client. No credentials or trading endpoints."""
     def __init__(self,futures_base:str,spot_base:str,timeout:float=12.):
@@ -24,7 +37,7 @@ class BitunixClient:
         if not isinstance(d,list): raise ExchangeError("Unexpected futures ticker response")
         return d
     async def futures_klines(self,symbol:str,interval:str,limit:int=200)->list[Candle]:
-        if interval not in {"5m","15m","1h","4h","1d"}: raise ValueError("Unsupported interval")
+        if interval not in INTERVAL_MS: raise ValueError("Unsupported interval")
         d=await self._get(f"{self.futures_base}/api/v1/futures/market/kline",{"symbol":symbol,"interval":interval,"limit":min(max(limit,20),200)})
         if not isinstance(d,list) or not d: raise ExchangeError(f"No candles for {symbol} {interval}")
         out=[]
