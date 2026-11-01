@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timezone
 from app.models import Candle
 from app.ict import analyse_ict, killzone
+from app.smc import analyse_smc
 
 class ICTTests(unittest.TestCase):
     def test_ny_killzone_uses_dst_aware_timezone(self):
@@ -28,8 +29,12 @@ class ICTTests(unittest.TestCase):
         for i in list(range(19,20))+list(range(21,50)):
             rows[i]=Candle(i*3600000,100,100.5,99,100,1000,10)
         rows[20]=Candle(20*3600000,103,104,100.5,102.5,1000,10)
+        smc=analyse_smc(rows)
+        self.assertTrue(any(x["direction"]=="BULLISH" and x["index"]==15 for x in smc["liquidity_sweeps"]),smc["liquidity_sweeps"])
+        self.assertTrue(any(x["direction"]=="BULLISH" and x["index"]==18 for x in smc["structure_events"]),smc["structure_events"])
+        self.assertTrue(any(x["direction"]=="BULLISH" and x["index"]==18 for x in smc["fair_value_gaps"]),smc["fair_value_gaps"])
         result=analyse_ict(rows,direction="LONG")
-        self.assertEqual(result["status"],"ICT_CONFIRMED")
+        self.assertEqual(result["status"],"ICT_CONFIRMED",result)
         self.assertEqual(result["setup"]["direction"],"LONG")
         self.assertEqual(result["setup"]["sweep_index"],15)
         self.assertEqual(result["setup"]["mss_index"],18)
