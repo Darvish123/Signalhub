@@ -44,7 +44,13 @@ class BitunixClient:
         for x in d:
             try: c=Candle(int(x["time"]),float(x["open"]),float(x["high"]),float(x["low"]),float(x["close"]),float(x.get("quoteVol") or 0),float(x.get("baseVol") or 0))
             except (KeyError,TypeError,ValueError) as e: raise ExchangeError(f"Malformed candle: {e}") from e
-            if not c.valid(): raise ExchangeError("Invalid OHLCV candle")
+            if not c.valid():
+                raise ExchangeError(
+                    "Invalid OHLCV candle: "
+                    f"time={c.time_ms}, open={c.open}, high={c.high}, "
+                    f"low={c.low}, close={c.close}, "
+                    f"quote_volume={c.quote_volume}, base_volume={c.base_volume}"
+                )
             out.append(c)
         out.sort(key=lambda x:x.time_ms)
         if len({x.time_ms for x in out})!=len(out): raise ExchangeError("Duplicate candle timestamps")
