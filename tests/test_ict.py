@@ -14,7 +14,7 @@ class ICTTests(unittest.TestCase):
         self.assertEqual(analyse_ict(rows)["status"],"NO_SETUP")
 
     def test_rejects_non_chronological_data(self):
-        rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(50)]
+        rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(21)]
         rows[20]=Candle(rows[19].time_ms,100,101,99,100,1000,10)
         with self.assertRaises(ValueError):
             analyse_ict(rows)
@@ -26,7 +26,7 @@ class ICTTests(unittest.TestCase):
         rows[10]=Candle(10*3600000,100,101,95,96,1000,10)
         rows[15]=Candle(15*3600000,98,100,94,96,1000,10)
         rows[18]=Candle(18*3600000,103,110,102,109,1000,10)
-        for i in list(range(19,20))+list(range(21,50)):
+        for i in list(range(19,20)):
             rows[i]=Candle(i*3600000,100,100.5,99,100,1000,10)
         rows[20]=Candle(20*3600000,103,104,100.5,102.5,1000,10)
         smc=analyse_smc(rows)
