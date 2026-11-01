@@ -39,10 +39,10 @@ async def smc_analysis(symbol:str,interval:str="15m",limit:int=Query(200,ge=20,l
 
 async def scan_one(symbol:str):
     regime,setup,entry=await asyncio.gather(
+        client.futures_klines(symbol,"1d",100),
         client.futures_klines(symbol,"4h",100),
-        client.futures_klines(symbol,"1h",100),
-        client.futures_klines(symbol,"15m",100))
-    for candles,tf in ((regime,"4h"),(setup,"1h"),(entry,"15m")): validate_fresh_candles(candles,tf)
+        client.futures_klines(symbol,"1h",200))
+    for candles,tf in ((regime,"1d"),(setup,"4h"),(entry,"1h")): validate_fresh_candles(candles,tf)
     result=analyse(symbol,"FUTURES",regime,setup,entry,settings.min_score,settings.min_net_rr,settings.min_quote_volume_24h)
     return {"id":store.save(result),**result.to_dict()}
 
