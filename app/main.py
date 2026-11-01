@@ -4,13 +4,14 @@ from app.config import settings
 from app.exchange import BitunixClient,ExchangeError
 from app.storage import SignalStore
 from app.strategy import analyse
-app=FastAPI(title="SignalHub",version="0.1.0",description="Read-only market analysis; no order execution.")
+from app.smc import analyse_smc
+app=FastAPI(title="SignalHub",version="0.2.0",description="Read-only market analysis with deterministic SMC indicators; no order execution.")
 client=BitunixClient(settings.bitunix_futures_base_url,settings.bitunix_spot_base_url,settings.request_timeout_seconds)
 store=SignalStore(settings.database_path)
 
 @app.get("/health")
 async def health():
-    return {"status":"ok","service":"signalhub","version":"0.1.0","mode":"signals_only"}
+    return {"status":"ok","service":"signalhub","version":"0.2.0","mode":"signals_only"}
 
 @app.get("/v1/market/tickers")
 async def tickers(limit:int=Query(50,ge=1,le=200)):
@@ -25,6 +26,16 @@ async def klines(symbol:str,interval:str="15m",limit:int=Query(100,ge=20,le=200)
     try:
         rows=await client.futures_klines(symbol.upper(),interval,limit)
         return {"source":"bitunix_public_futures","symbol":symbol.upper(),"interval":interval,"count":len(rows),"data":[c.__dict__ for c in rows]}
+    except (ExchangeError,ValueError) as exc:
+        raise HTTPException(502,str(exc))
+
+@app.get("/v1/analysis/smc/{symbol}")
+async def smc_analysis(symbol:str,interval:str="15m",limit:int=Query(200,ge=20,le=200)):
+    """Return deterministic candle-based SMC indicators; this endpoint does not issue trade instructions."""
+    try:
+        candles=await client.futures_klines(symbol.upper(),interval,limit)
+        result=analyse_smc(candles)
+        return {"source":"bitunix_public_futures","symbol":symbol.upper(),"interval":interval,"candles":len(candles),**result}
     except (ExchangeError,ValueError) as exc:
         raise HTTPException(502,str(exc))
 
