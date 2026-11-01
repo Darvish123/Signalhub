@@ -1,4 +1,4 @@
-"""Multi-timeframe SMC strategy: 1D bias, 4H structure, 1H trigger; closed candles only."""
+"""Multi-timeframe SMC strategy: 1D bias, 4H structure, 1H trigger."""
 import time
 from app.analysis import atr,ema
 from app.models import Candle,Signal
@@ -27,34 +27,35 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         elif d[-1]<d20<d50: side="SHORT"; score=20; reasons=["1D bearish directional bias"]
         else: return Signal(side="NONE",status="NO_TRADE",score=0,reasons=["1D trend is not aligned"],
                             risks=["No directional edge"],**base)
-        h4=analyse_smc(setup[-160:])
-        h4_events=h4["structure_events"]
+        h4=analyse_smc(setup[-160:]); h4_events=h4["structure_events"]
         aligned=[x for x in h4_events[-8:] if x["direction"]==("BULLISH" if side=="LONG" else "BEARISH")]
         if not aligned: return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                                       risks=["No recent aligned 4H BOS/CHoCH"],**base)
         score+=20; reasons.append("4H confirmed SMC structure aligned")
-        h1=analyse_smc(entry_tf[-200:])
-        direction="BULLISH" if side=="LONG" else "BEARISH"
+        h1=analyse_smc(entry_tf[-200:]); direction="BULLISH" if side=="LONG" else "BEARISH"
         events=[x for x in h1["structure_events"][-6:] if x["direction"]==direction]
         sweeps=[x for x in h1["liquidity_sweeps"][-6:] if x["direction"]==direction]
         gaps=[x for x in h1["fair_value_gaps"][-6:] if x["direction"]==direction]
         if not events or not (sweeps or gaps):
             return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                           risks=["1H trigger needs aligned BOS/CHoCH plus liquidity sweep or FVG"],**base)
-        score+=10; reasons.append("1H SMC entry confirmation: aligned structure + sweep/FVG")
         ict=analyse_ict(entry_tf[-200:],direction=side,require_killzone=ict_require_killzone)
         if ict["status"]!="ICT_CONFIRMED":
             return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                           risks=[ict.get("reason","ICT sequence not confirmed")],**base)
-        ict_setup=ict["setup"]
-        score+=20
-        reasons.append("ICT sequence confirmed: sweep -> displacement MSS -> FVG retracement")
+        ict_setup=ict["setup"]; tap=entry_tf[-1]
+        # A valid OB is a confluence zone only when it overlaps the actual ICT retracement.
+        matching_obs=[ob for ob in h1["order_blocks"] if ob["direction"]==direction and
+                      ob["mitigation"]!="INVALIDATED" and ob["index"]<ict_setup["tap_index"] and
+                      ob["lower"]<=ict_setup["fvg_high"] and ob["upper"]>=ict_setup["fvg_low"]]
+        if not matching_obs:
+            return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
+                          risks=["ICT FVG tap lacks a matching, non-invalidated 1H order block"],**base)
+        score+=10; reasons.append("1H SMC: aligned structure, liquidity event and valid OB/FVG confluence")
+        score+=20; reasons.append("ICT sequence confirmed: sweep -> displacement MSS -> FVG retracement")
         reasons.append(f"ICT confluence: OTE={ict_setup['in_ote']}, PD={ict_setup['premium_discount']}, killzone={ict_setup['killzone'] or 'outside'}")
-        entry=entry_tf[-1].close
-        vol=atr(entry_tf,14)
+        entry=tap.close; vol=atr(entry_tf,14); round_trip_cost=entry*(round_trip_cost_bps/10_000)
         swings=h1["swings"]
-        # Estimated round-trip fee and slippage for the minimum net-RR gate.
-        round_trip_cost=entry*(round_trip_cost_bps/10_000)
         if side=="LONG":
             structural=[x["price"] for x in swings if x["kind"]=="LOW" and x["index"]<len(entry_tf)-1 and x["price"]<entry]
             if not structural: raise ValueError("No confirmed 1H swing low for structural invalidation")
@@ -67,19 +68,20 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
             stop=max(max(structural[-3:]),ict_setup["sweep_extreme"])+.10*vol
             if not stop>entry: raise ValueError("Short structural stop is not above entry")
             risk=stop-entry; target=entry-(3*risk+4*round_trip_cost)
-        net_loss=risk+round_trip_cost
-        net_gain=3*risk+3*round_trip_cost
+        net_loss=risk+round_trip_cost; net_gain=3*risk+3*round_trip_cost
         rr=net_gain/net_loss if net_loss>0 else 0
         if rr<min_rr: return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                                     risks=[f"Net RR {rr:.3f} below required {min_rr:.2f}"],**base)
-        score+=10; reasons.append("Structural invalidation stop beyond sweep extreme and minimum net RR passed")
-        if entry_tf[-1].quote_volume>=min_quote_volume/24: score+=10
-        else: return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
-                            risks=["1H quote volume below liquidity threshold"],**base)
+        score+=10; reasons.append("Structural invalidation stop and minimum net RR passed")
+        # Sum 24 completed 1H quote-volume candles; never approximate 24h turnover from one bar.
+        if len(entry_tf)<24 or sum(x.quote_volume for x in entry_tf[-24:])<min_quote_volume:
+            return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
+                          risks=["Rolling 24-closed-hour quote volume below liquidity threshold"],**base)
+        score+=10
         if score<min_score: return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                                           risks=["Minimum score not reached"],**base)
         return Signal(symbol=symbol,market=market,side=side,status="CANDIDATE",score=min(score,100),
             entry=entry,stop_loss=stop,take_profit_1=target,take_profit_2=target,net_rr=round(rr,3),
-            reasons=reasons,risks=["Paper-only; verify exchange candle quality and fee tier before use"],created_at_ms=now_ms)
+            reasons=reasons,risks=["Paper-only; OHLC SMC/ICT labels are heuristic, not proof of institutional activity"],created_at_ms=now_ms)
     except ValueError as exc:
         return Signal(side="NONE",status="NO_TRADE",score=0,reasons=[],risks=[str(exc)],**base)
