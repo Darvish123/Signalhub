@@ -9,5 +9,5 @@ class Candle:
 @dataclass
 class Signal:
     symbol:str; market:str; side:str; status:str; score:int; entry:float|None; stop_loss:float|None
-    take_profit_1:float|None; take_profit_2:float|None; net_rr:float|None; reasons:list[str]; risks:list[str]; created_at_ms:int; timeframe:str="15m"
+    take_profit_1:float|None; take_profit_2:float|None; net_rr:float|None; reasons:list[str]; risks:list[str]; created_at_ms:int; timeframe:str="1h"
     def to_dict(self)->dict[str,Any]: return asdict(self)
