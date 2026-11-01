@@ -29,7 +29,6 @@ async def download_funding(symbol:str,start_ms:int,end_ms:int,base_url:str="http
             for row in rows:
                 t=int(row["fundingTime"]); rate=float(row["fundingRate"]); mark=float(row["markPrice"])
                 if a<=t<=b and mark>0: records[t]=FundingRate(t,rate,mark)
-            await asyncio.sleep(.12)
         await fetch(start_ms,end_ms)
     return [records[t] for t in sorted(records)]
 
