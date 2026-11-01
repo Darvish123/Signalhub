@@ -47,13 +47,13 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
             if not structural: raise ValueError("No confirmed 1H swing low for structural invalidation")
             stop=min(structural[-3:])-.10*vol
             if not stop<entry: raise ValueError("Long structural stop is not below entry")
-            risk=entry-stop; target=entry+3*risk
+            risk=entry-stop; target=entry+(3*risk+4*round_trip_cost)
         else:
             structural=[x["price"] for x in swings if x["kind"]=="HIGH" and x["index"]<len(entry_tf)-1 and x["price"]>entry]
             if not structural: raise ValueError("No confirmed 1H swing high for structural invalidation")
             stop=max(structural[-3:])+.10*vol
             if not stop>entry: raise ValueError("Short structural stop is not above entry")
-            risk=stop-entry; target=entry-3*risk
+            risk=stop-entry; target=entry-(3*risk+4*round_trip_cost)
         # Conservative placeholder round-trip cost; configure actual fee/slippage in backtest execution.
         round_trip_cost=entry*.0014
         net_loss=risk+round_trip_cost
