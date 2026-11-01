@@ -6,8 +6,10 @@ from app.smc import analyse_smc
 
 def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_tf:list[Candle],
             min_score:int=70,min_rr:float=3.,min_quote_volume:float=1_000_000,
-            now_ms:int|None=None)->Signal:
+            round_trip_cost_bps:float=14., now_ms:int|None=None)->Signal:
     now_ms=now_ms or int(time.time()*1000)
+    if min_quote_volume<0 or round_trip_cost_bps<0 or min_rr<=0:
+        raise ValueError("Invalid strategy cost, volume or RR configuration")
     base=dict(symbol=symbol,market=market,entry=None,stop_loss=None,take_profit_1=None,
               take_profit_2=None,net_rr=None,created_at_ms=now_ms)
     if min(len(regime),len(setup),len(entry_tf))<60:
@@ -43,7 +45,7 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         vol=atr(entry_tf,14)
         swings=h1["swings"]
         # Estimated round-trip fee and slippage for the minimum net-RR gate.
-        round_trip_cost=entry*.0014
+        round_trip_cost=entry*(round_trip_cost_bps/10_000)
         if side=="LONG":
             structural=[x["price"] for x in swings if x["kind"]=="LOW" and x["index"]<len(entry_tf)-1 and x["price"]<entry]
             if not structural: raise ValueError("No confirmed 1H swing low for structural invalidation")
