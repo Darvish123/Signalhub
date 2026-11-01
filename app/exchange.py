@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 from app.models import Candle
 class ExchangeError(RuntimeError): pass
+class InvalidMarketDataError(ExchangeError): pass
 INTERVAL_MS={"5m":300000,"15m":900000,"1h":3600000,"4h":14400000,"1d":86400000}
 def validate_fresh_candles(candles:list[Candle],interval:str,now_ms:int|None=None,max_age_intervals:float=2.5)->None:
     if interval not in INTERVAL_MS: raise ValueError("Unsupported interval")
@@ -45,7 +46,7 @@ class BitunixClient:
             try: c=Candle(int(x["time"]),float(x["open"]),float(x["high"]),float(x["low"]),float(x["close"]),float(x.get("quoteVol") or 0),float(x.get("baseVol") or 0))
             except (KeyError,TypeError,ValueError) as e: raise ExchangeError(f"Malformed candle: {e}") from e
             if not c.valid():
-                raise ExchangeError(
+                raise InvalidMarketDataError(
                     "Invalid OHLCV candle: "
                     f"time={c.time_ms}, open={c.open}, high={c.high}, "
                     f"low={c.low}, close={c.close}, "
