@@ -57,7 +57,7 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
             if not stop>entry: raise ValueError("Short structural stop is not above entry")
             risk=stop-entry; target=entry-(3*risk+4*round_trip_cost)
         net_loss=risk+round_trip_cost
-        net_gain=3*risk-round_trip_cost
+        net_gain=3*risk+3*round_trip_cost
         rr=net_gain/net_loss if net_loss>0 else 0
         if rr<min_rr: return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                                     risks=[f"Net RR {rr:.3f} below required {min_rr:.2f}"],**base)
