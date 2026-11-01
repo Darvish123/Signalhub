@@ -13,6 +13,8 @@ def validate_fresh_candles(candles:list[Candle],interval:str,now_ms:int|None=Non
         raise ExchangeError("Candle timestamps must be strictly increasing")
     if any(b.time_ms-a.time_ms>step*1.5 for a,b in zip(candles,candles[1:])):
         raise ExchangeError("Candle series contains a time gap larger than 1.5 intervals")
+    if any(c.time_ms % step != 0 for c in candles):
+        raise ExchangeError("Candle timestamps are not aligned to interval boundaries")
     age=now_ms-candles[-1].time_ms
     if age < -step or age > step*max_age_intervals:
         raise ExchangeError(f"Stale or future candle data: last candle age {age} ms")
@@ -38,7 +40,7 @@ class BitunixClient:
         return d
     async def futures_klines(self,symbol:str,interval:str,limit:int=200)->list[Candle]:
         if interval not in INTERVAL_MS: raise ValueError("Unsupported interval")
-        d=await self._get(f"{self.futures_base}/api/v1/futures/market/kline",{"symbol":symbol,"interval":interval,"limit":min(max(limit,20),200)})
+        d=await self._get(f"{self.futures_base}/api/v1/futures/market/kline",{"symbol":symbol,"interval":interval,"limit":min(max(limit,1),200),"type":"LAST_PRICE"})
         if not isinstance(d,list) or not d: raise ExchangeError(f"No candles for {symbol} {interval}")
         out=[]
         for x in d:
