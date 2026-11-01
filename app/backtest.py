@@ -10,7 +10,7 @@ from app.strategy import analyse
 class Trade:
     symbol:str; side:str; signal_time_ms:int; entry_time_ms:int; exit_time_ms:int
     entry:float; exit:float; stop:float; target:float; gross_pnl_pct:float; net_pnl_pct:float
-    exit_reason:str; bars_held:int
+    exit_reason:str; bars_held:int; position_fraction:float; equity_pnl_pct:float
 
 def load_csv(path:str)->list[Candle]:
     out=[]
@@ -42,7 +42,7 @@ def stats(trades:list[Trade],start_ms:int,end_ms:int,initial_equity:float=10000)
     wins=[t for t in trades if t.net_pnl_pct>0]; losses=[t for t in trades if t.net_pnl_pct<=0]
     equity=initial_equity; peak=equity; max_dd=0.; curve=[]
     for t in trades:
-        equity*=1+t.net_pnl_pct/100; peak=max(peak,equity); max_dd=max(max_dd,(peak-equity)/peak if peak else 0); curve.append(equity)
+        equity*=1+t.equity_pnl_pct/100; peak=max(peak,equity); max_dd=max(max_dd,(peak-equity)/peak if peak else 0); curve.append(equity)
     returns=[t.net_pnl_pct for t in trades]
     gross_win=sum(t.net_pnl_pct for t in wins); gross_loss=abs(sum(t.net_pnl_pct for t in losses))
     return {"period_start_utc":datetime.fromtimestamp(start_ms/1000,timezone.utc).isoformat(),
@@ -56,8 +56,8 @@ def stats(trades:list[Trade],start_ms:int,end_ms:int,initial_equity:float=10000)
       "longs":sum(t.side=="LONG" for t in trades),"shorts":sum(t.side=="SHORT" for t in trades),
       "exit_reasons":{k:sum(t.exit_reason==k for t in trades) for k in ("STOP","TARGET","TIME")}}
 
-def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps:float=5.,slippage_bps:float=2.,risk_pct:float=0.5,max_hold_bars:int=192)->dict:
-    if fee_bps<0 or slippage_bps<0 or not 0<risk_pct<=2 or max_hold_bars<1: raise ValueError("Invalid cost/risk/holding configuration")
+def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps:float=5.,slippage_bps:float=2.,risk_pct:float=0.5,max_hold_bars:int=192,max_leverage:float=1.0)->dict:
+    if fee_bps<0 or slippage_bps<0 or not 0<risk_pct<=2 or max_hold_bars<1 or not 0<max_leverage<=5: raise ValueError("Invalid cost/risk/holding configuration")
     h1=aggregate(candles,3600000); h4=aggregate(candles,14400000)
     trades=[]; i=0; cost_rate=(fee_bps+slippage_bps)/10000
     # The strategy is evaluated using only bars closed before the decision bar.
@@ -87,13 +87,17 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         exit_price*=1-cost_rate if side=="LONG" else 1+cost_rate
         gross=((exit_price-entry)/entry*100) if side=="LONG" else ((entry-exit_price)/entry*100)
         net=gross
-        trades.append(Trade(symbol,side,now,entry_bar.time_ms,candles[exit_idx].time_ms,round(entry,10),round(exit_price,10),stop,target,round(gross,5),round(net,5),reason,exit_idx-i))
+        stop_distance=abs(entry-stop)/entry
+        # Risk-budget sizing: notional fraction is capped by max_leverage (1.0 = unlevered).
+        position_fraction=min(max_leverage,(risk_pct/100)/stop_distance) if stop_distance>0 else 0.0
+        equity_pnl_pct=net*position_fraction
+        trades.append(Trade(symbol,side,now,entry_bar.time_ms,candles[exit_idx].time_ms,round(entry,10),round(exit_price,10),stop,target,round(gross,5),round(net,5),reason,exit_idx-i,round(position_fraction,6),round(equity_pnl_pct,6)))
         i=exit_idx+1
     report=stats(trades,start_ms,end_ms)
     report.update({"symbol":symbol,"timeframe":"15m","strategy":"existing 4h/1h/15m EMA+ATR+pivot strategy; SMC is not wired into entry decisions",
-      "fee_bps_per_side":fee_bps,"slippage_bps_per_side":slippage_bps,"risk_pct_per_trade_assumption":risk_pct,
+      "fee_bps_per_side":fee_bps,"slippage_bps_per_side":slippage_bps,"risk_pct_per_trade":risk_pct,"max_leverage":max_leverage,
       "max_holding_hours":max_hold_bars*.25,"execution":"next 15m open; adverse costs; stop wins if stop and target touch same candle",
-      "funding":"NOT_MODELLED","position_sizing":"returns are unlevered per-position price returns; risk_pct is metadata only, not compounded position sizing",
+      "funding":"NOT_MODELLED","position_sizing":"risk-budget sizing by stop distance; position fraction capped by max_leverage; equity curve compounds position-weighted returns",
       "trades":[asdict(t) for t in trades]})
     return report
 
@@ -103,11 +107,12 @@ def main():
     p.add_argument("--start",required=True,help="UTC ISO date, e.g. 2026-10-01")
     p.add_argument("--end",required=True,help="UTC ISO date inclusive, e.g. 2026-10-31")
     p.add_argument("--fee-bps",type=float,default=5.); p.add_argument("--slippage-bps",type=float,default=2.)
+    p.add_argument("--risk-pct",type=float,default=0.5); p.add_argument("--max-leverage",type=float,default=1.0)
     p.add_argument("--out",default="backtest-report.json")
     a=p.parse_args(); data=load_csv(a.csv)
     start=int(datetime.fromisoformat(a.start).replace(tzinfo=timezone.utc).timestamp()*1000)
     end=int(datetime.fromisoformat(a.end).replace(tzinfo=timezone.utc).timestamp()*1000)+86400000-1
-    result=run_backtest(data,a.symbol,start,end,a.fee_bps,a.slippage_bps)
+    result=run_backtest(data,a.symbol,start,end,a.fee_bps,a.slippage_bps,a.risk_pct,max_leverage=a.max_leverage)
     Path(a.out).write_text(json.dumps(result,indent=2),encoding="utf-8")
     print(json.dumps({k:v for k,v in result.items() if k!="trades"},indent=2))
 if __name__=="__main__": main()
