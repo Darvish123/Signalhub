@@ -6,6 +6,7 @@ Read-only market analysis for Bitunix Futures. Fetches public market data, appli
 
 ## Included
 - Public Futures tickers and historical candles.
+- Bounded universe scan of up to 20 liquid USDT perpetuals (default 10).
 - 4h regime, 1h alignment, 15m momentum confirmation.
 - EMA trend, ATR volatility guard, confirmed swing pivots, structural SL/TP candidates.
 - Estimated net reward/risk and score gates; explicit NO_TRADE.
@@ -25,26 +26,28 @@ Open http://127.0.0.1:8000/docs and /health.
 - GET /health
 - GET /v1/market/tickers
 - GET /v1/market/klines/BTCUSDT?interval=15m&limit=100
-- POST /v1/scan/BTCUSDT
+- POST /v1/scan/BTCUSDT — scan one contract
+- POST /v1/scan?limit=10 — scan most liquid eligible USDT perpetuals
 - GET /v1/signals
 - GET /v1/signals/{id}
 
 Run read-only live API smoke test: `python -m scripts.smoke`.
 Tests: `python -m unittest discover -s tests -v`.
 
-## Known limitations
-- Live exchange requests have not yet been executed from this environment; run smoke test and check CI before relying on output.
+## Known limitations / safety
+- Live exchange requests have not yet been executed from this environment; run smoke test and inspect CI before relying on output.
 - Strategy is a screening heuristic, not validated alpha. No historical backtest or forward paper-trading evidence.
 - Fee allowance is a placeholder; calibrate actual fees, spread and slippage. Funding is excluded.
-- No OI/funding/liquidation/order-book filters, portfolio risk sizing, dashboard, alerts, auth, or trade lifecycle.
+- No OI/funding/liquidation/order-book filters, portfolio risk sizing, dashboard, alerts, authentication, or trade lifecycle.
 - Spot is not integrated into scanner. No order endpoint exists.
+- **Do not expose this unauthenticated API publicly.** Run locally or behind a trusted private network until authentication and deployment hardening are added.
 
 ## Next milestones
 1. Validate live API payloads, timestamps and rate limits.
 2. Implement and test BOS/CHoCH, liquidity sweeps, FVG and order blocks.
 3. Add walk-forward backtest with fees/spread/slippage/funding.
 4. Add forward paper trading, sizing and portfolio exposure.
-5. Add dashboard, alerts, monitoring and deployment.
+5. Add auth, dashboard, alerts, monitoring and deployment.
 6. Add a separately validated Spot engine.
 
 Never enable automated execution without separate review and explicit approval.
