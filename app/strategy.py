@@ -67,7 +67,7 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         score+=10; reasons.append("1H SMC: aligned structure, liquidity event and valid OB/FVG confluence")
         score+=20; reasons.append("ICT sequence confirmed: sweep -> displacement MSS -> FVG retracement")
         reasons.append(f"ICT confluence: OTE={ict_setup['in_ote']}, PD={ict_setup['premium_discount']}, killzone={ict_setup['killzone'] or 'outside'}")
-        entry=tap.close; vol=atr(entry_tf,14); round_trip_cost=entry*(round_trip_cost_bps/10_000)
+        entry=lower_tf[-1].close if pa_setup else tap.close; vol=atr(entry_tf,14); round_trip_cost=entry*(round_trip_cost_bps/10_000)
         swings=h1["swings"]
         if side=="LONG":
             structural=[x["price"] for x in swings if x["kind"]=="LOW" and x["index"]<len(entry_tf)-1 and x["price"]<entry]
