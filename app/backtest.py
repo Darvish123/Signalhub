@@ -83,6 +83,11 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         entry=entry_bar.open*(1+cost if side=="LONG" else 1-cost)
         stop=sig.stop_loss; target=sig.take_profit_1
         if (side=="LONG" and not stop<entry<target) or (side=="SHORT" and not target<entry<stop): i+=1; continue
+        # Re-check minimum 3R using the actual next-open fill after any price gap.
+        actual_round_trip_cost=2*entry*cost
+        actual_net_risk=abs(entry-stop)+actual_round_trip_cost
+        actual_net_reward=abs(target-entry)-actual_round_trip_cost
+        if actual_net_reward<=0 or actual_net_reward/actual_net_risk<3.: i+=1; continue
         exit_idx=min(len(candles)-1,i+max_hold_bars); exit_price=None; reason="TIME"
         for j in range(i+1,exit_idx+1):
             bar=candles[j]
