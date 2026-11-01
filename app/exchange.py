@@ -11,7 +11,7 @@ class InvalidMarketDataError(ExchangeError):
         self.total = total
         self.invalid = invalid
         super().__init__(f"{len(invalid)} of {total} candles failed OHLCV validation for {symbol} {interval}")
-INTERVAL_MS={"5m":300000,"15m":900000,"1h":3600000,"4h":14400000,"1d":86400000}
+INTERVAL_MS={"1m":60000,"3m":180000,"5m":300000,"15m":900000,"30m":1800000,"1h":3600000,"2h":7200000,"4h":14400000,"6h":21600000,"8h":28800000,"12h":43200000,"1d":86400000,"3d":259200000,"1w":604800000,"1M":2592000000}
 def validate_fresh_candles(candles:list[Candle],interval:str,now_ms:int|None=None,max_age_intervals:float=2.5)->None:
     if interval not in INTERVAL_MS: raise ValueError("Unsupported interval")
     if not candles: raise ExchangeError("Empty candle series")
@@ -43,7 +43,7 @@ class BitunixClient:
         d=await self._get(f"{self.futures_base}/api/v1/futures/market/tickers")
         if not isinstance(d,list): raise ExchangeError("Unexpected futures ticker response")
         return d
-    async def futures_klines(self,symbol:str,interval:str,limit:int=200,candle_type:str="LAST_PRICE")->list[Candle]:
+    async def futures_klines(self,symbol:str,interval:str,limit:int=200,candle_type:str="LAST_PRICE",end_time_ms:int|None=None)->list[Candle]:
         if interval not in INTERVAL_MS: raise ValueError("Unsupported interval")
         if candle_type not in ("LAST_PRICE", "MARK_PRICE"): raise ValueError("Unsupported candle type")\n        d=await self._get(f"{self.futures_base}/api/v1/futures/market/kline",{"symbol":symbol,"interval":interval,"limit":min(max(limit,20),200),"type":candle_type})
         if not isinstance(d,list) or not d: raise ExchangeError(f"No candles for {symbol} {interval}")
