@@ -34,7 +34,7 @@ class SMCTests(unittest.TestCase):
         self.assertEqual(ob.mitigation_index,5)
     def test_sweep_consumes_level_once(self):
         rows=[c(0,10,11,9,10),c(1,10,12,9.5,11),c(2,11,11.5,10,11),
-              c(3,11,12.5,10.5,11.2),c(4,11.2,12.8,10.6,11.1)]
+              c(3,11,12.5,10.5,10.8),c(4,11.2,12.8,10.6,10.9)]
         swings=[type("S",(),{"index":0,"kind":"HIGH","price":11})()]
         found=liquidity_sweeps(rows,swings,0)
         self.assertEqual(len(found),1)
