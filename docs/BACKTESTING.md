@@ -28,3 +28,21 @@ python -m app.backtest --csv data/BTCUSDT_1h.csv --funding-csv data/BTCUSDT_fund
 - This is a single-symbol, one-position-at-a-time model. It does not simulate cross-symbol portfolio correlation, simultaneous exposure, liquidation, or exchange-specific margin tiers. A successful unit-test run is not evidence of profitability.
 
 The Bitunix historical funding endpoint is documented at https://www.bitunix.com/api-docs/futures/market/get_funding_rate_history.html.
+
+## Multi-symbol shared-equity portfolio mode
+
+The portfolio runner accepts one continuous 1H LAST_PRICE CSV and one historical funding CSV per symbol. File names are `SYMBOL_1h.csv` and `SYMBOL_funding.csv` under `data/`. Each symbol must include at least 60 days of hourly warm-up before the requested test start, plus the full test interval. Missing funding files are a hard failure.
+
+Example:
+```bash
+python -m scripts.run_portfolio_backtest \
+  --symbols BTCUSDT,ETHUSDT,SOLUSDT \
+  --data-dir data \
+  --start-ms <UTC_TEST_START_MS> --end-ms <UTC_TEST_END_MS> \
+  --fee-bps 5 --slippage-bps 2 --initial-equity 100 \
+  --risk-pct 0.5 --max-leverage 1 \
+  --max-positions 5 --max-open-risk-pct 2 \
+  --out reports/portfolio.json
+```
+
+The portfolio engine generates each symbol's closed-candle candidate trades, merges entries by timestamp, then allocates against one shared account. Default caps of five simultaneous positions and 2% aggregate open stop-risk are conservative engineering defaults, not user-validated optimal parameters. PnL is applied to the shared equity using the equity committed when each trade was opened. Positions rejected by the concurrency or open-risk cap are reported separately. This first portfolio version does not model cross-symbol correlation, liquidation, maintenance margin, exchange portfolio margin, or intrabar order contention; these remain explicit limitations and must be addressed before treating the simulation as production-grade.
