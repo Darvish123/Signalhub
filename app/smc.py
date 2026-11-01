@@ -78,8 +78,9 @@ def confirmed_swings(candles: list[Candle], left: int = 3, right: int = 3) -> li
         labelled.append(Swing(s.index, s.time_ms, s.price, s.kind, label))
     return labelled
 
-def structure_events(candles: list[Candle], swings: list[Swing] | None = None) -> list[StructureEvent]:
-    swings = swings if swings is not None else confirmed_swings(candles)
+def structure_events(candles: list[Candle], swings: list[Swing] | None = None, confirmation_bars: int = 3) -> list[StructureEvent]:
+    if confirmation_bars < 0: raise ValueError("confirmation_bars must be >= 0")
+    swings = swings if swings is not None else confirmed_swings(candles, right=confirmation_bars)
     highs = [s for s in swings if s.kind == "HIGH"]
     lows = [s for s in swings if s.kind == "LOW"]
     events: list[StructureEvent] = []
@@ -87,12 +88,12 @@ def structure_events(candles: list[Candle], swings: list[Swing] | None = None) -
     broken_highs: set[int] = set()
     broken_lows: set[int] = set()
     for i, c in enumerate(candles):
-        eligible_highs = [s for s in highs if s.index < i and s.index not in broken_highs]
-        eligible_lows = [s for s in lows if s.index < i and s.index not in broken_lows]
+        eligible_highs = [s for s in highs if s.index + confirmation_bars < i and s.index not in broken_highs]
+        eligible_lows = [s for s in lows if s.index + confirmation_bars < i and s.index not in broken_lows]
         h = eligible_highs[-1] if eligible_highs else None
         l = eligible_lows[-1] if eligible_lows else None
-        up = h is not None and c.close > h.price and c.close > c.open
-        down = l is not None and c.close < l.price and c.close < c.open
+        up = h is not None and c.close > h.price
+        down = l is not None and c.close < l.price
         if up:
             kind = "CHoCH" if trend == "BEARISH" else "BOS"
             events.append(StructureEvent(i, c.time_ms, kind, "BULLISH", h.price, c.close))
@@ -103,11 +104,12 @@ def structure_events(candles: list[Candle], swings: list[Swing] | None = None) -
             broken_lows.add(l.index); trend = "BEARISH"
     return events
 
-def liquidity_sweeps(candles: list[Candle], swings: list[Swing] | None = None) -> list[LiquiditySweep]:
-    swings = swings if swings is not None else confirmed_swings(candles)
+def liquidity_sweeps(candles: list[Candle], swings: list[Swing] | None = None, confirmation_bars: int = 3) -> list[LiquiditySweep]:
+    if confirmation_bars < 0: raise ValueError("confirmation_bars must be >= 0")
+    swings = swings if swings is not None else confirmed_swings(candles, right=confirmation_bars)
     out = []
     for i, c in enumerate(candles):
-        prior = [s for s in swings if s.index < i]
+        prior = [s for s in swings if s.index + confirmation_bars < i]
         highs = [s for s in prior if s.kind == "HIGH" and c.high > s.price and c.close < s.price]
         lows = [s for s in prior if s.kind == "LOW" and c.low < s.price and c.close > s.price]
         if highs:
@@ -159,8 +161,8 @@ def analyse_smc(candles: list[Candle], left: int = 3, right: int = 3, min_fvg: f
     if len(candles) < left+right+3: raise ValueError("Insufficient candles for SMC analysis")
     if not all(c.valid() for c in candles): raise ValueError("Invalid candle in SMC input")
     swings = confirmed_swings(candles,left,right)
-    events = structure_events(candles,swings)
-    sweeps = liquidity_sweeps(candles,swings)
+    events = structure_events(candles,swings,confirmation_bars=right)
+    sweeps = liquidity_sweeps(candles,swings,right)
     gaps = fair_value_gaps(candles,min_fvg)
     blocks = order_blocks(candles,events)
     return {"methodology":"deterministic_candle_heuristics_v1",
