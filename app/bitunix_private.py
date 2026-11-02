@@ -9,7 +9,6 @@ import hashlib
 import secrets
 import time
 from typing import Any
-from urllib.parse import urlencode
 
 import httpx
 
@@ -51,8 +50,10 @@ class BitunixPrivateReadOnlyClient:
         timeout: float = 12.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        if not api_key or not secret_key:
+        if not api_key.strip() or not secret_key.strip():
             raise ValueError("BITUNIX_API_KEY and BITUNIX_API_SECRET are required")
+        if timeout <= 0:
+            raise ValueError("timeout must be greater than zero")
         self._api_key = api_key
         self._secret_key = secret_key
         self.base_url = base_url.rstrip("/")
@@ -61,7 +62,7 @@ class BitunixPrivateReadOnlyClient:
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         clean_params = {k: v for k, v in (params or {}).items() if v is not None}
-        nonce = secrets.token_hex(32)  # 64 hexadecimal characters
+        nonce = secrets.token_hex(16)  # 32 chars; Bitunix requires nonce length < 64
         timestamp = str(time.time_ns() // 1_000_000)
         headers = {
             "api-key": self._api_key,
@@ -92,7 +93,6 @@ class BitunixPrivateReadOnlyClient:
             raise BitunixPrivateError("Unexpected Bitunix response format")
         code = str(payload.get("code", "0"))
         if code not in ("0", "200"):
-            # Exchange message only; never echo request headers or secrets.
             message = str(payload.get("msg", "unknown exchange error"))[:240]
             raise BitunixPrivateError(f"Bitunix rejected {path}: code={code}, msg={message}")
         return payload.get("data")
