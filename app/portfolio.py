@@ -18,6 +18,7 @@ def run_portfolio_backtest(
     initial_equity: float = 100.0,
     max_positions: int = 5,
     max_open_risk_pct: float = 2.0,
+    lower_tf_by_symbol: dict[str, list] | None = None,
 ) -> dict:
     if not candles_by_symbol:
         raise ValueError("At least one symbol dataset is required")
@@ -34,6 +35,7 @@ def run_portfolio_backtest(
             risk_pct, max_leverage=max_leverage,
             funding_rates=funding_by_symbol.get(symbol, []),
             initial_equity=initial_equity,
+            lower_tf_candles=(lower_tf_by_symbol or {}).get(symbol),
         )
         symbol_reports[symbol] = {
             "candidate_trades": report["trades"].__len__(),
@@ -131,6 +133,7 @@ def run_portfolio_backtest(
         "rejections": rejected,
         "limitations": [
             "Signals are generated independently per symbol, then portfolio entries are allocated chronologically.",
+            "15m Price Action is only included when a validated lower_tf_by_symbol dataset is supplied.",
             "No cross-symbol correlation, liquidation engine, maintenance margin tiers or exchange-specific portfolio margin.",
             "Candidate trades are simulated with the same per-trade risk fraction; portfolio equity is shared at realized PnL accounting.",
             "Funding completeness must be audited against the exchange settlement schedule for every symbol."
