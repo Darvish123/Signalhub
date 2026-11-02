@@ -40,6 +40,70 @@ def validate_fresh_candles(candles: list[Candle], interval: str,
     if age < -step or age > step * max_age_intervals:
         raise ExchangeError(f"Stale or future candle data: last candle age {age} ms")
 
+
+class OKXClient:
+    """Public read-only OKX USDT linear perpetual market-data client."""
+
+    BARS = {"15m": "15m", "1h": "1H", "4h": "4H", "1d": "1Dutc"}
+
+    def __init__(self, base_url: str = "https://www.okx.com", timeout: float = 12.):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    async def _get(self, params: dict[str, Any]) -> Any:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.base_url}/api/v5/market/candles", params=params
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ExchangeError(f"OKX market-data request failed: {exc}") from exc
+        if not isinstance(payload, dict) or str(payload.get("code")) != "0":
+            raise ExchangeError(f"OKX market-data API error: {payload}")
+        data = payload.get("data")
+        if not isinstance(data, list):
+            raise ExchangeError("Unexpected OKX candle response")
+        return data
+
+    async def futures_klines(self, symbol: str, interval: str, limit: int = 200) -> list[Candle]:
+        if interval not in self.BARS:
+            raise ValueError("Unsupported OKX interval")
+        if not 1 <= limit <= 300:
+            raise ValueError("OKX candle limit must be between 1 and 300")
+        normalized = symbol.upper()
+        if not normalized.endswith("USDT"):
+            raise ValueError("Only USDT linear perpetual symbols are supported")
+        inst_id = normalized.removesuffix("USDT") + "-USDT-SWAP"
+        rows = await self._get({"instId": inst_id, "bar": self.BARS[interval], "limit": str(limit)})
+        out, invalid = [], []
+        for row in rows:
+            if not isinstance(row, list) or len(row) < 9:
+                raise ExchangeError(f"Malformed OKX candle row: {row}")
+            if str(row[8]) != "1":
+                continue
+            candle = Candle(
+                int(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]),
+                float(row[7]), float(row[5]),
+            )
+            if not candle.valid():
+                invalid.append({
+                    "time_ms": candle.time_ms, "open": candle.open, "high": candle.high,
+                    "low": candle.low, "close": candle.close,
+                    "quote_volume": candle.quote_volume, "base_volume": candle.base_volume,
+                    "reason": "OHLCV invariant failed",
+                })
+            out.append(candle)
+        if invalid:
+            raise InvalidMarketDataError(normalized, interval, len(rows), invalid)
+        if not out:
+            raise ExchangeError(f"No confirmed OKX candles for {normalized} {interval}")
+        out.sort(key=lambda x: x.time_ms)
+        if len({x.time_ms for x in out}) != len(out):
+            raise ExchangeError("Duplicate OKX candle timestamps")
+        return out
+
 class BitunixClient:
     """Public read-only Bitunix client. No credentials or trading endpoints."""
     def __init__(self, futures_base: str, spot_base: str, timeout: float = 12.):

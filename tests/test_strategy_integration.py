@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from app.models import Candle
-from app.strategy import analyse
+from app.strategy import analyse, meets_minimum_rr
 
 
 def candles(count, interval_ms, start_ms, close_fn=None, quote_volume=100_000):
@@ -26,7 +26,6 @@ def candles(count, interval_ms, start_ms, close_fn=None, quote_volume=100_000):
 class StrategyIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.now = 20_000_000_000
-        # Rising daily closes establish the actual 1D EMA20 > EMA50 bias.
         self.daily = candles(70, 86_400_000, self.now - 70 * 86_400_000,
                              lambda i: 80.0 + i * 0.5)
         self.h4 = candles(70, 14_400_000, self.now - 70 * 14_400_000)
@@ -119,6 +118,11 @@ class StrategyIntegrationTests(unittest.TestCase):
         signal = self.run_pipeline(lower_tf=bad_rows)
         self.assertEqual(signal.status, "NO_TRADE")
         self.assertIn("invalid", signal.risks[0])
+
+    def test_minimum_rr_accepts_boundary_with_float_noise(self):
+        self.assertTrue(meets_minimum_rr(2.9999999999, 3.0))
+        self.assertTrue(meets_minimum_rr(3.0, 3.0))
+        self.assertFalse(meets_minimum_rr(2.99999, 3.0))
 
 
 if __name__ == "__main__":

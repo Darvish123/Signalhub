@@ -25,7 +25,7 @@ concurrency:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,6 +53,33 @@ jobs:
       - name: Add report to job summary
         if: always() && hashFiles('artifacts/report/summary.md') != ''
         run: cat artifacts/report/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Require strategy and portfolio trade evidence
+        if: success()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("artifacts/report/portfolio-report.json")
+          if not path.exists():
+              raise SystemExit("VALIDATION_FAILED: portfolio report is missing")
+          report = json.loads(path.read_text(encoding="utf-8"))
+          portfolio = report.get("portfolio", {})
+          audits = portfolio.get("symbol_data_audit", {})
+          candidates = sum(int(row.get("candidate_trades", 0)) for row in audits.values())
+          accepted = int(portfolio.get("accepted_trades", 0))
+          if candidates == 0:
+              raise SystemExit(
+                  "STRATEGY_VALIDATION_FAILED: zero strategy candidates across all symbols; "
+                  "data integrity passed but the strategy has not demonstrated an actionable setup."
+              )
+          if accepted == 0:
+              raise SystemExit(
+                  f"PORTFOLIO_VALIDATION_FAILED: {candidates} strategy candidates existed, "
+                  "but portfolio controls accepted none."
+              )
+          print(f"VALIDATED: {candidates} strategy candidates; {accepted} portfolio trades.")
+          PY
       - name: Upload report and raw historical data
         if: always() && hashFiles('artifacts/**') != ''
         uses: actions/upload-artifact@v4

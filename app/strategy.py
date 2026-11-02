@@ -1,10 +1,19 @@
 """Multi-timeframe SMC strategy: 1D bias, 4H structure, 1H trigger."""
+import math
 import time
 from app.analysis import atr,ema
 from app.models import Candle,Signal
 from app.smc import analyse_smc
 from app.ict import analyse_ict
 from app.price_action import analyse_price_action
+
+
+def meets_minimum_rr(net_rr: float, minimum_rr: float, tolerance: float = 1e-9) -> bool:
+    """Accept a mathematically boundary-equal RR despite floating point representation."""
+    return net_rr >= minimum_rr or math.isclose(
+        net_rr, minimum_rr, rel_tol=tolerance, abs_tol=tolerance
+    )
+
 
 def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_tf:list[Candle],
             min_score:int=70,min_rr:float=3.,min_quote_volume:float=1_000_000,
@@ -57,7 +66,6 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
                               risks=[pa.get("reason","No aligned 15m Price Action trigger")],**base)
             pa_setup=pa["trigger"]
             score+=10; reasons.append(f"15m Price Action trigger confirmed: {pa_setup['pattern']}")
-        # A valid OB is a confluence zone only when it overlaps the actual ICT retracement.
         matching_obs=[ob for ob in h1["order_blocks"] if ob["direction"]==direction and
                       ob["mitigation"]!="INVALIDATED" and ob["index"]<ict_setup["tap_index"] and
                       ob["lower"]<=ict_setup["fvg_high"] and ob["upper"]>=ict_setup["fvg_low"]]
@@ -83,10 +91,10 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
             risk=stop-entry; target=entry-(3*risk+4*round_trip_cost)
         net_loss=risk+round_trip_cost; net_gain=3*risk+3*round_trip_cost
         rr=net_gain/net_loss if net_loss>0 else 0
-        if rr<min_rr: return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
-                                    risks=[f"Net RR {rr:.3f} below required {min_rr:.2f}"],**base)
+        if not meets_minimum_rr(rr,min_rr):
+            return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
+                          risks=[f"Net RR {rr:.6f} below required {min_rr:.6f}"],**base)
         score+=10; reasons.append("Structural invalidation stop and minimum net RR passed")
-        # Sum 24 completed 1H quote-volume candles; never approximate 24h turnover from one bar.
         if len(entry_tf)<24 or sum(x.quote_volume for x in entry_tf[-24:])<min_quote_volume:
             return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                           risks=["Rolling 24-closed-hour quote volume below liquidity threshold"],**base)

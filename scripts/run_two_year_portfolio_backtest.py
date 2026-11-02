@@ -34,6 +34,7 @@ DEFAULT_SYMBOLS = [
 ]
 BASE_URL = "https://www.okx.com"
 HOUR_MS = 3_600_000
+M15_MS = 900_000
 DAY_MS = 24 * HOUR_MS
 
 
@@ -66,20 +67,21 @@ async def okx_data(client: httpx.AsyncClient, path: str, params: dict) -> list:
     raise RuntimeError(f"OKX request retries exhausted for {path}")
 
 
-async def download_hourly(
-    client: httpx.AsyncClient, symbol: str, start_ms: int, end_exclusive_ms: int
+async def download_history(
+    client: httpx.AsyncClient, symbol: str, start_ms: int, end_exclusive_ms: int,
+    bar: str = "1H", interval_ms: int = HOUR_MS,
 ) -> list[Candle]:
-    """Download OKX 1H history candles, 100 rows per backwards page."""
+    """Download confirmed OKX history candles, paging backwards without gaps."""
     inst_id = okx_inst_id(symbol)
     cursor = end_exclusive_ms
     records: dict[int, Candle] = {}
     pages = 0
     while cursor > start_ms:
         pages += 1
-        if pages > 300:
-            raise RuntimeError(f"{symbol}: candle pagination exceeded safety page limit")
+        if pages > 1200:
+            raise RuntimeError(f"{symbol} {bar}: candle pagination exceeded safety page limit")
         rows = await okx_data(client, "/api/v5/market/history-candles", {
-            "instId": inst_id, "bar": "1H", "after": str(cursor), "limit": "100",
+            "instId": inst_id, "bar": bar, "after": str(cursor), "limit": "100",
         })
         if not rows:
             break
@@ -109,7 +111,7 @@ async def download_hourly(
 
     result = [records[t] for t in sorted(records)]
     if not result:
-        raise RuntimeError(f"{symbol}: no OKX 1H history returned")
+        raise RuntimeError(f"{symbol}: no OKX {bar} history returned")
     return result
 
 
@@ -168,7 +170,8 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
         f"- Wins / losses: **{result['wins']} / {result['losses']}**",
         f"- Win rate: **{result['win_rate_pct']:.2f}%**",
         f"- Profit factor: **{result['profit_factor']}**",
-        f"- Maximum drawdown: **{result['max_drawdown_pct']:.2f}%**",
+        f"- Maximum realized drawdown (closed trades only): **{result['max_drawdown_pct']:.2f}%**",
+        f"- Drawdown basis: {result.get('max_drawdown_basis', 'not specified')}",
         "",
         "## Assumptions and limitations",
         "",
@@ -177,7 +180,7 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
         "- Risk: 0.5% risk budget per trade, 2x maximum leverage, maximum 5 concurrent positions and 2% portfolio open-risk cap.",
         "- Costs: 5 bps fee + 2 bps slippage per side; Bitunix historical funding and mark prices applied at recorded settlements.",
         "- Cross-venue limitation: OHLCV comes from OKX while funding comes from Bitunix. Price, liquidity and execution may differ from Bitunix. This is a benchmark, not an exact Bitunix simulation.",
-        "- The 15m Price Action filter in the live scan path is not present in the current historical backtest implementation.",
+        "- The 15m Price Action filter is now applied to historical entries using only fully closed 15m candles at each hourly decision point.",
         "- No liquidation engine, maintenance-margin tiers, cross-symbol correlation model or intrabar order-book simulation.",
         "",
         "## Per-symbol performance",
@@ -192,15 +195,27 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
         )
     lines.extend([
         "",
+        "## Signal rejection diagnostics",
+        "",
+        "Counts below explain why hourly evaluations did not become entries. They are diagnostic counts, not trade counts.",
+        "",
+        "| Symbol | Rejection reason | Count |",
+        "|---|---|---:|",
+    ])
+    for symbol, row in result["symbol_data_audit"].items():
+        for reason, count in row.get("signal_diagnostics", {}).items():
+            lines.append(f"| {symbol} | {reason.replace('|', '/') } | {count} |")
+    lines.extend([
+        "",
         "## Data integrity",
         "",
-        "| Symbol | 1H candles | Candle audit | Bitunix funding records | Funding audit |",
-        "|---|---:|---|---:|---|",
+        "| Symbol | 1H candles | 15m candles | Candle audit (1H/15m) | Bitunix funding records | Funding audit |",
+        "|---|---:|---:|---|---:|---|",
     ])
     for symbol, row in data_audit.items():
         lines.append(
-            f"| {symbol} | {row['candles']} | {row['candle_status']} "
-            f"(gaps: {row['candle_gaps']}) | {row['funding']['records']} | {row['funding']['status']} |"
+            f"| {symbol} | {row['candles']} | {row['candles_15m']} | {row['candle_status']} "
+            f"(1H gaps: {row['candle_gaps']}; 15m gaps: {row['candle_gaps_15m']}) | {row['funding']['records']} | {row['funding']['status']} |"
         )
     lines.extend([
         "",
@@ -245,12 +260,13 @@ async def run(args: argparse.Namespace) -> None:
             await asyncio.sleep(0.11)
 
         candles_by_symbol: dict[str, list[Candle]] = {}
+        lower_tf_by_symbol: dict[str, list[Candle]] = {}
         funding_by_symbol: dict[str, list[FundingRate]] = {}
         audit: dict[str, dict] = {}
         raw_dir = Path("artifacts/historical_data")
         for index, symbol in enumerate(symbols, start=1):
             print(f"[{index}/10] Downloading {symbol} OKX 1h history candles...", flush=True)
-            candles = await download_hourly(client, symbol, warmup_start, test_end)
+            candles = await download_history(client, symbol, warmup_start, test_end, "1H", HOUR_MS)
             candle_audit = audit_candles(candles, HOUR_MS)
             if candles[0].time_ms > warmup_start or candles[-1].time_ms < test_end - HOUR_MS:
                 raise RuntimeError(f"{symbol}: historical candle boundary coverage is incomplete")
@@ -260,6 +276,16 @@ async def run(args: argparse.Namespace) -> None:
                 )
             candles_by_symbol[symbol] = validated_candles(candles, HOUR_MS)
             save_candles(candles, raw_dir / f"{symbol}_1h.csv")
+
+            print(f"[{index}/10] Downloading {symbol} OKX 15m history candles...", flush=True)
+            lower_rows = await download_history(client, symbol, warmup_start, test_end, "15m", M15_MS)
+            lower_audit = audit_candles(lower_rows, M15_MS)
+            if lower_rows[0].time_ms > warmup_start or lower_rows[-1].time_ms < test_end - M15_MS:
+                raise RuntimeError(f"{symbol}: 15m historical candle boundary coverage is incomplete")
+            if lower_audit["invalid_count"] or lower_audit["duplicate_timestamps_ms"] or lower_audit["discontinuities"]:
+                raise RuntimeError(f"{symbol}: 15m candle quality gate failed: {json.dumps(lower_audit)}")
+            lower_tf_by_symbol[symbol] = validated_candles(lower_rows, M15_MS)
+            save_candles(lower_rows, raw_dir / f"{symbol}_15m.csv")
 
             print(f"[{index}/10] Downloading {symbol} Bitunix historical funding...", flush=True)
             funding = await download_funding(
@@ -276,10 +302,13 @@ async def run(args: argparse.Namespace) -> None:
                 raise RuntimeError(f"{symbol}: Bitunix funding coverage audit failed: {json.dumps(funding_check)}")
             audit[symbol] = {
                 "candles": len(candles),
+                "candles_15m": len(lower_rows),
                 "first_candle_utc": datetime.fromtimestamp(candles[0].time_ms / 1000, timezone.utc).isoformat(),
                 "last_candle_utc": datetime.fromtimestamp(candles[-1].time_ms / 1000, timezone.utc).isoformat(),
                 "candle_status": "PASS",
                 "candle_gaps": len(candle_audit["discontinuities"]),
+                "candle_gaps_15m": len(lower_audit["discontinuities"]),
+                "candle_15m_status": "PASS",
                 "price_source": "OKX linear perpetual history-candles",
                 "funding_source": "Bitunix historical funding-rate API",
                 "funding": funding_check,
@@ -289,6 +318,7 @@ async def run(args: argparse.Namespace) -> None:
         result = run_portfolio_backtest(
             candles_by_symbol=candles_by_symbol,
             funding_by_symbol=funding_by_symbol,
+            lower_tf_by_symbol=lower_tf_by_symbol,
             start_ms=test_start,
             end_ms=decision_end,
             fee_bps=args.fee_bps,
@@ -322,7 +352,7 @@ async def run(args: argparse.Namespace) -> None:
     }
     result["assumptions"] = {
         "symbols": symbols,
-        "timeframe": "1H execution; 1D/4H/1H SMC strategy",
+        "timeframe": "1H execution; 1D/4H/1H SMC with closed 15m Price Action trigger",
         "price_source": "OKX linear perpetual OHLCV",
         "funding_source": "Bitunix historical funding and mark price",
         "initial_equity_quote": args.initial_equity,
@@ -334,7 +364,7 @@ async def run(args: argparse.Namespace) -> None:
         "slippage_bps_per_side": args.slippage_bps,
         "warmup_days": 60,
         "time_exit_bars": 48,
-        "15m_price_action_filter": "not included in current app.backtest.py implementation",
+        "15m_price_action_filter": "enabled; only fully closed OKX 15m candles are passed at each hourly decision",
         "execution_venue_limitation": "OKX OHLCV with Bitunix funding; cross-venue benchmark, not exact Bitunix fills",
     }
     output = Path(args.output)

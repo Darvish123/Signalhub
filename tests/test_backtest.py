@@ -12,6 +12,7 @@ class BacktestTests(unittest.TestCase):
   self.assertAlmostEqual(position_fraction_for_risk(100,98,.5,1.),.25)
   self.assertEqual(position_fraction_for_risk(100,99.99,.5,1.),1.)
   with self.assertRaises(ValueError): position_fraction_for_risk(100,100,.5,1.)
+  self.assertAlmostEqual(position_fraction_for_risk(100,98,.5,2.,.0014),.005/.0214)
  def test_funding_report_tracks_loaded_settlements(self):
   rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(1600)]
   rates=[FundingRate(rows[1500].time_ms+1,.001,100)]
@@ -35,5 +36,29 @@ class BacktestTests(unittest.TestCase):
   self.assertGreaterEqual(len(result["trades"]),1)
   self.assertLess(result["trades"][0]["funding_pnl_pct_equity"],0)
   self.assertEqual(result["trades"][0]["exit_reason"],"TIME")
+
+ def test_backtest_passes_only_fully_closed_15m_window(self):
+  rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(1700)]
+  lower=[Candle(i*900000,100,101,99,100,250,2.5) for i in range(1700*4)]
+  start=rows[1500].time_ms
+  no_trade=Signal(symbol="TESTUSDT",market="FUTURES",side="NONE",status="NO_TRADE",
+      score=0,entry=None,stop_loss=None,take_profit_1=None,take_profit_2=None,
+      net_rr=None,reasons=[],risks=["No 15m trigger"],created_at_ms=start)
+  with patch("app.backtest.analyse",return_value=no_trade) as mocked:
+   run_backtest(rows,"TESTUSDT",start,rows[-1].time_ms,lower_tf_candles=lower)
+  self.assertGreater(len(mocked.call_args_list),0)
+  first=mocked.call_args_list[0]
+  self.assertEqual(first.kwargs["lower_tf"][-1].time_ms, first.kwargs["now_ms"]-900000)
+  self.assertLessEqual(first.kwargs["lower_tf"][-1].time_ms+900000,first.kwargs["now_ms"])
+
+ def test_no_trade_reasons_are_counted_for_diagnostics(self):
+  rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(1700)]
+  start=rows[1500].time_ms
+  no_trade=Signal(symbol="TESTUSDT",market="FUTURES",side="NONE",status="NO_TRADE",
+      score=0,entry=None,stop_loss=None,take_profit_1=None,take_profit_2=None,
+      net_rr=None,reasons=[],risks=["1D trend is not aligned"],created_at_ms=start)
+  with patch("app.backtest.analyse",return_value=no_trade):
+   result=run_backtest(rows,"TESTUSDT",start,rows[-1].time_ms)
+  self.assertGreater(result["signal_diagnostics"].get("1D trend is not aligned",0),0)
 
 if __name__=="__main__": unittest.main()
