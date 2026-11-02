@@ -79,7 +79,8 @@ def run_portfolio_backtest(
     for trade in candidates:
         close_until(trade["entry_time_ms"])
         stop_distance = abs(trade["entry"] - trade["stop"]) / trade["entry"]
-        risk_on_equity_pct = trade["position_fraction"] * stop_distance * 100.0
+        round_trip_cost_pct = 2.0 * (fee_bps + slippage_bps) / 10_000.0
+        risk_on_equity_pct = trade["position_fraction"] * (stop_distance + round_trip_cost_pct) * 100.0
         current_open_risk = sum(x["_risk_pct"] for x in active)
         reason = None
         if len(active) >= max_positions:
@@ -121,6 +122,7 @@ def run_portfolio_backtest(
             "infinite" if gross_profit else None
         ),
         "max_drawdown_pct": round(max_drawdown * 100.0, 5),
+        "max_drawdown_basis": "realized equity at closed-trade exits; excludes intra-trade unrealized mark-to-market drawdown",
         "max_positions": max_positions,
         "max_open_risk_pct": max_open_risk_pct,
         "risk_pct_per_trade": risk_pct,
