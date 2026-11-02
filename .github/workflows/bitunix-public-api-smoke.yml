@@ -1,0 +1,33 @@
+name: bitunix-public-api-smoke
+
+on:
+  push:
+    branches:
+      - research/integrated-backtest
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Probe Bitunix ticker and OKX market candles
+        run: python scripts/smoke_public_exchange_api.py --symbol BTCUSDT
+      - name: Upload smoke report
+        if: always() && hashFiles('artifacts/report/bitunix-public-api-smoke.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitunix-public-api-smoke
+          path: artifacts/report/bitunix-public-api-smoke.json
+          retention-days: 30
