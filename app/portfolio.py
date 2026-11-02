@@ -39,6 +39,7 @@ def run_portfolio_backtest(
             "candidate_trades": report["trades"].__len__(),
             "funding_records_loaded": report["funding_records_loaded"],
             "funding_settlements_in_test_window": report["funding_settlements_in_test_window"],
+            "signal_diagnostics": report.get("signal_diagnostics", {}),
         }
         candidates.extend(report["trades"])
 
