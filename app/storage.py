@@ -11,16 +11,13 @@ from app.models import Signal
 
 
 class SignalStore:
-    """Small SQLite store with explicit connection and transaction lifecycle."""
+    """Small file-backed SQLite store with explicit connection lifecycle."""
 
     def __init__(self, path: str):
         if not path or path == ":memory:":
-            # A single in-memory database needs a shared connection; this store
-            # deliberately supports file-backed databases only.
-            if path != ":memory:":
-                raise ValueError("Database path must not be empty")
+            raise ValueError("A non-empty file-backed database path is required")
         self.path = path
-        if path != ":memory:" and os.path.dirname(path):
+        if os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
         with self._db() as db:
             db.execute(
