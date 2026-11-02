@@ -286,8 +286,8 @@ async def run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--start", default="2024-11-02")
-    parser.add_argument("--end", default="2026-11-02")
+    parser.add_argument("--start", default="2024-10-30")
+    parser.add_argument("--end", default="2026-10-30")
     parser.add_argument("--symbols", default=",".join(DEFAULT_SYMBOLS))
     parser.add_argument("--initial-equity", type=float, default=1000.0)
     parser.add_argument("--max-leverage", type=float, default=2.0)
