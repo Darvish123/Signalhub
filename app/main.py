@@ -3,7 +3,7 @@ import time
 from dataclasses import replace
 from fastapi import FastAPI, HTTPException, Query
 from app.config import settings
-from app.exchange import BitunixClient, ExchangeError, validate_fresh_candles, INTERVAL_MS
+from app.exchange import BitunixClient, OKXClient, ExchangeError, validate_fresh_candles, INTERVAL_MS
 from app.storage import SignalStore
 from app.strategy import analyse
 from app.smc import analyse_smc
@@ -13,6 +13,7 @@ app = FastAPI(title="SignalHub", version="0.8.1",
     description="Read-only market analysis and paper risk sizing; no order execution.")
 client = BitunixClient(settings.bitunix_futures_base_url, settings.bitunix_spot_base_url,
                        settings.request_timeout_seconds)
+market_client = OKXClient(timeout=settings.request_timeout_seconds)
 store = SignalStore(settings.database_path)
 
 @app.get("/health")
@@ -35,8 +36,8 @@ async def tickers(limit: int = Query(50, ge=1, le=200)):
 @app.get("/v1/market/klines/{symbol}")
 async def klines(symbol: str, interval: str = "15m", limit: int = Query(100, ge=1, le=200)):
     try:
-        rows = await client.futures_klines(symbol.upper(), interval, limit)
-        return {"source": "bitunix_public_futures", "symbol": symbol.upper(),
+        rows = await market_client.futures_klines(symbol.upper(), interval, limit)
+        return {"source": "okx_usdt_linear_perpetual", "symbol": symbol.upper(),
                 "interval": interval, "count": len(rows), "data": [c.__dict__ for c in rows]}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
@@ -46,14 +47,14 @@ async def klines(symbol: str, interval: str = "15m", limit: int = Query(100, ge=
 @app.get("/v1/analysis/smc/{symbol}")
 async def smc_analysis(symbol: str, interval: str = "15m", limit: int = Query(200, ge=1, le=200)):
     try:
-        candles = await client.futures_klines(symbol.upper(), interval, limit)
+        candles = await market_client.futures_klines(symbol.upper(), interval, limit)
         now_ms = time.time_ns() // 1_000_000
         validate_fresh_candles(candles, interval, now_ms)
         step = INTERVAL_MS[interval]
         closed = [c for c in candles if c.time_ms + step <= now_ms]
         validate_fresh_candles(closed, interval, now_ms)
         result = analyse_smc(closed)
-        return {"source": "bitunix_public_futures", "symbol": symbol.upper(),
+        return {"source": "okx_usdt_linear_perpetual", "symbol": symbol.upper(),
                 "interval": interval, "candles": len(closed), **result}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
@@ -70,7 +71,7 @@ def apply_risk_gate(signal):
     return replace(signal, risk_plan=plan.to_dict())
 
 async def _closed_series(symbol: str, interval: str, limit: int, now_ms: int):
-    candles = await client.futures_klines(symbol, interval, limit)
+    candles = await market_client.futures_klines(symbol, interval, limit)
     validate_fresh_candles(candles, interval, now_ms)
     step = INTERVAL_MS[interval]
     closed = [c for c in candles if c.time_ms + step <= now_ms]
@@ -90,7 +91,9 @@ async def scan_one(symbol: str):
         now_ms=now_ms, lower_tf=lower)
     result = apply_risk_gate(result)
     signal_id = store.save(result)
-    return {"id": signal_id, **result.to_dict()}
+    return {"id": signal_id, **result.to_dict(),
+            "market_data_source": "okx_usdt_linear_perpetual",
+            "universe_source": "bitunix_public_futures_tickers"}
 
 @app.post("/v1/scan/{symbol}")
 async def scan(symbol: str):
@@ -126,6 +129,8 @@ async def scan_universe(limit: int = Query(10, ge=1, le=20)):
                     return {"symbol": symbol, "status": "DATA_ERROR", "error": str(exc)}
         results = await asyncio.gather(*(bounded(s) for s in symbols))
         return {"scanned": len(results),
+            "ticker_source": "bitunix_public_futures_tickers",
+            "market_data_source": "okx_usdt_linear_perpetual",
             "candidates": sum(x.get("status") == "CANDIDATE" for x in results),
             "risk_rejected": sum(x.get("status") == "NO_TRADE" and
                 any(str(r).startswith("Risk gate:") for r in x.get("risks", [])) for x in results),
