@@ -1,10 +1,6 @@
 name: two-year-portfolio-backtest
 
 on:
-  push:
-    branches:
-      - research/backtest-two-years
-      - research/integrated-backtest
   pull_request:
     branches:
       - research/backtest-two-years
@@ -23,8 +19,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: signalhub-two-year-backtest-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: false
+  group: signalhub-two-year-backtest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backtest:
