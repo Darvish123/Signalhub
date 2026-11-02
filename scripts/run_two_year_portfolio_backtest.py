@@ -108,17 +108,11 @@ async def download_hourly(
                 raise RuntimeError(
                     f"{symbol}: reconstructed 1H candle failed validation at {candle.time_ms}"
                 )
-            rebuilt.append({
-                "timestamp_ms": candle.time_ms,
-                "original_1h_issues": candle_issues(candle),
-                "reconstructed_from": f"{len(source)} validated Bitunix {source_interval} LAST_PRICE candles",
-            })
-            await asyncio.sleep(0.12)
             records[candle.time_ms] = aggregate
             rebuilt.append({
                 "timestamp_ms": candle.time_ms,
                 "original_1h_issues": candle_issues(candle),
-                "reconstructed_from": "4 validated Bitunix 15m LAST_PRICE candles",
+                "reconstructed_from": f"{len(source)} validated Bitunix {source_interval} LAST_PRICE candles",
             })
             await asyncio.sleep(0.12)
 
@@ -213,7 +207,7 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
     for symbol, row in data_audit.items():
         lines.append(
             f"| {symbol} | {row['candles']} | {row['candle_status']} "
-            f"(lower-TF rebuilds: {row.get('reconstructed_from_15m_count', 0)}) | "
+            f"(lower-TF rebuilds: {row.get('reconstructed_lower_tf_count', 0)}) | "
             f"{row['funding']['records']} | {row['funding']['status']} |"
         )
     lines.extend([
