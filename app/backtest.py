@@ -1,5 +1,6 @@
 """Single-position 1H execution backtest with 1D/4H/1H SMC and historical funding."""
 import argparse,csv,json
+from collections import Counter
 from dataclasses import asdict,dataclass
 from datetime import datetime,timezone
 from pathlib import Path
@@ -77,7 +78,7 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
             raise ValueError("Funding mark prices must be positive")
     h4=aggregate(candles,14400000); d1=aggregate(candles,86400000)
     funding=sorted(funding_rates or [],key=lambda x:x.funding_time_ms)
-    trades=[]; i=0; cost=(fee_bps+slippage_bps)/10000
+    trades=[]; diagnostics=Counter(); i=0; cost=(fee_bps+slippage_bps)/10000
     while i<len(candles)-1:
         decision=candles[i].time_ms+3600000
         if decision<start_ms or decision>end_ms: i+=1; continue
@@ -89,16 +90,22 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
                     min_score=70,min_rr=3.,min_quote_volume=1_000_000,
                     round_trip_cost_bps=2*(fee_bps+slippage_bps),now_ms=decision)
         if sig.status!="CANDIDATE" or sig.side not in ("LONG","SHORT") or None in (sig.stop_loss,sig.take_profit_1):
+            reason=(sig.risks[0] if sig.risks else sig.status or "UNKNOWN_SIGNAL_REJECTION")
+            diagnostics[reason]+=1
             i+=1; continue
         entry_bar=candles[i+1]; side=sig.side
         entry=entry_bar.open*(1+cost if side=="LONG" else 1-cost)
         stop=sig.stop_loss; target=sig.take_profit_1
-        if (side=="LONG" and not stop<entry<target) or (side=="SHORT" and not target<entry<stop): i+=1; continue
+        if (side=="LONG" and not stop<entry<target) or (side=="SHORT" and not target<entry<stop):
+            diagnostics["Next-open entry invalidates stop/target geometry"]+=1
+            i+=1; continue
         # Re-check minimum 3R using the actual next-open fill after any price gap.
         actual_round_trip_cost=2*entry*cost
         actual_net_risk=abs(entry-stop)+actual_round_trip_cost
         actual_net_reward=abs(target-entry)-actual_round_trip_cost
-        if actual_net_reward<=0 or actual_net_reward/actual_net_risk<3.: i+=1; continue
+        if actual_net_reward<=0 or actual_net_reward/actual_net_risk<3.:
+            diagnostics["Next-open fill reduces net reward/risk below 3.0"]+=1
+            i+=1; continue
         exit_idx=min(len(candles)-1,i+max_hold_bars); exit_price=None; reason="TIME"
         for j in range(i+1,exit_idx+1):
             bar=candles[j]
@@ -127,6 +134,7 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
       "initial_equity":initial_equity,"funding_records_loaded":len(funding),"funding_settlements_in_test_window":expected_settlements,
       "funding":"HISTORICAL rates applied at settlements while position open" if funding else "MISSING - do not treat as full-cost futures result",
       "execution":"next 1H open; adverse costs; stop first if stop and target touched in same candle",
+      "signal_diagnostics":dict(sorted(diagnostics.items(),key=lambda x:(-x[1],x[0]))),
       "trades":[asdict(t) for t in trades]})
     return report
 
