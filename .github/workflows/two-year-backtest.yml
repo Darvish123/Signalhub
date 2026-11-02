@@ -9,11 +9,11 @@ on:
       start_date:
         description: "UTC start date (YYYY-MM-DD)"
         required: true
-        default: "2024-11-02"
+        default: "2024-10-30"
       end_date:
         description: "UTC end date, exclusive (YYYY-MM-DD)"
         required: true
-        default: "2026-11-02"
+        default: "2026-10-30"
 
 permissions:
   contents: read
@@ -37,8 +37,8 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Download historical data and run portfolio backtest
         env:
-          START_DATE: ${{ inputs.start_date || '2024-11-02' }}
-          END_DATE: ${{ inputs.end_date || '2026-11-02' }}
+          START_DATE: ${{ inputs.start_date || '2024-10-30' }}
+          END_DATE: ${{ inputs.end_date || '2026-10-30' }}
         run: |
           python scripts/run_two_year_portfolio_backtest.py \
             --start "$START_DATE" \
