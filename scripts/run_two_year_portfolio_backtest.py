@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Reproducible two-year Bitunix USDT-perpetual portfolio backtest.
+"""Reproducible two-year SignalHub futures portfolio backtest.
 
-Uses the repository's current 1D/4H/1H SMC strategy and 1H execution engine.
-Downloads public OHLCV and historical funding only; no credentials or orders.
+The Bitunix historical OHLC endpoint returned malformed candles, including
+malformed MARK_PRICE bars. This runner therefore uses Binance USDⓈ-M perpetual
+OHLCV and funding as an explicitly disclosed cross-venue benchmark. No keys or
+order endpoints are used.
 """
 from __future__ import annotations
 
@@ -12,24 +14,24 @@ import csv
 import json
 import statistics
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-# Make repository packages importable when this file is launched by path.
+import httpx
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.config import settings
-from app.exchange import BitunixClient
-from app.funding import download_funding, save_funding_csv
+from app.backtest import HOUR_MS if False else None
+from app.funding import FundingRate, save_funding_csv
 from app.models import Candle
 from app.portfolio import run_portfolio_backtest
-from app.data_quality import audit_candles, candle_issues, validated_candles
+from app.data_quality import audit_candles, validated_candles
 
 DEFAULT_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
     "DOGEUSDT", "ADAUSDT", "LINKUSDT", "LTCUSDT", "BCHUSDT",
 ]
+BASE_URL = "https://fapi.binance.com"
 HOUR_MS = 3_600_000
 DAY_MS = 24 * HOUR_MS
 
@@ -39,75 +41,117 @@ def parse_utc_date(value: str) -> int:
     return int(parsed.timestamp() * 1000)
 
 
+async def get_json(client: httpx.AsyncClient, path: str, params: dict | None = None):
+    url = BASE_URL + path
+    for attempt in range(5):
+        try:
+            response = await client.get(url, params=params)
+            if response.status_code in (418, 429):
+                delay = float(response.headers.get("Retry-After", 1 + attempt * 2))
+                await asyncio.sleep(delay)
+                continue
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("code") not in (None, 0, "0"):
+                raise RuntimeError(f"Binance API error: {payload}")
+            return payload
+        except (httpx.HTTPError, ValueError) as exc:
+            if attempt == 4:
+                raise RuntimeError(f"Binance request failed: {exc}") from exc
+            await asyncio.sleep(0.5 * (2 ** attempt))
+    raise RuntimeError(f"Binance request retries exhausted for {path}")
+
+
 async def download_hourly(
-    client: BitunixClient, symbol: str, start_ms: int, end_exclusive_ms: int
-) -> tuple[list[Candle], list[dict]]:
-    """Download mark-price OHLC and last-price volume, paged by exclusive endTime.
-
-    Bitunix LAST_PRICE history has returned malformed OHLC rows. For a consistent
-    price series, this research run uses MARK_PRICE OHLC for every bar, while
-    retaining LAST_PRICE quote/base volume as the liquidity filter input.
-    """
-    cursor = end_exclusive_ms
+    client: httpx.AsyncClient, symbol: str, start_ms: int, end_exclusive_ms: int
+) -> list[Candle]:
+    """Download all 1H USDT-M perpetual klines in chronological pages."""
+    cursor = start_ms
     records: dict[int, Candle] = {}
-    last_price_anomalies: list[dict] = []
     pages = 0
-    while cursor > start_ms:
+    while cursor < end_exclusive_ms:
         pages += 1
-        if pages > 1500:
+        if pages > 100:
             raise RuntimeError(f"{symbol}: candle pagination exceeded safety page limit")
-        last_rows = await client.futures_klines(
-            symbol, "1h", 200, candle_type="LAST_PRICE",
-            end_time_ms=cursor, strict_validation=False,
-        )
-        await asyncio.sleep(0.12)
-        mark_rows = await client.futures_klines(
-            symbol, "1h", 200, candle_type="MARK_PRICE",
-            end_time_ms=cursor, strict_validation=False,
-        )
-        await asyncio.sleep(0.12)
-
-        mark_by_time = {x.time_ms: x for x in mark_rows}
-        eligible = [x for x in last_rows if start_ms <= x.time_ms < cursor]
-        if not eligible:
+        rows = await get_json(client, "/fapi/v1/klines", {
+            "symbol": symbol,
+            "interval": "1h",
+            "startTime": cursor,
+            "endTime": end_exclusive_ms - 1,
+            "limit": 1500,
+        })
+        if not isinstance(rows, list) or not rows:
             break
-        for last in eligible:
-            mark = mark_by_time.get(last.time_ms)
-            if mark is None:
-                raise RuntimeError(
-                    f"{symbol}: MARK_PRICE candle missing for LAST_PRICE timestamp {last.time_ms}"
+        parsed = []
+        for row in rows:
+            if not isinstance(row, list) or len(row) < 8:
+                raise RuntimeError(f"{symbol}: malformed Binance kline row: {row}")
+            t = int(row[0])
+            if start_ms <= t < end_exclusive_ms:
+                candle = Candle(
+                    t, float(row[1]), float(row[2]), float(row[3]), float(row[4]),
+                    float(row[7]), float(row[5]),
                 )
-            combined = Candle(
-                last.time_ms, mark.open, mark.high, mark.low, mark.close,
-                last.quote_volume, last.base_volume,
-            )
-            if not combined.valid():
-                raise RuntimeError(
-                    f"{symbol}: invalid MARK_PRICE OHLC or LAST_PRICE volume at {last.time_ms}: "
-                    f"{json.dumps({'mark': mark.__dict__, 'last': last.__dict__})}"
-                )
-            records[last.time_ms] = combined
-            if not last.valid():
-                last_price_anomalies.append({
-                    "timestamp_ms": last.time_ms,
-                    "last_price_ohlc": {
-                        "open": last.open, "high": last.high,
-                        "low": last.low, "close": last.close,
-                    },
-                    "issues": candle_issues(last),
-                    "used_for_price": False,
-                    "replacement_source": "Bitunix MARK_PRICE OHLC",
-                })
+                if not candle.valid():
+                    raise RuntimeError(f"{symbol}: invalid Binance OHLCV candle at {t}: {row}")
+                records[t] = candle
+                parsed.append(t)
+        if not parsed:
+            break
+        newest = max(parsed)
+        if newest < cursor:
+            raise RuntimeError(f"{symbol}: Binance candle pagination made no progress")
+        cursor = newest + HOUR_MS
+        await asyncio.sleep(0.08)
 
-        oldest = min(x.time_ms for x in eligible)
-        if oldest >= cursor:
-            raise RuntimeError(f"{symbol}: candle pagination made no progress")
-        cursor = oldest
+    result = [records[t] for t in sorted(records)]
+    if not result:
+        raise RuntimeError(f"{symbol}: no Binance 1H history returned")
+    return result
 
-    rows = [records[t] for t in sorted(records)]
-    if not rows:
-        raise RuntimeError(f"{symbol}: no historical 1h candles returned")
-    return rows, last_price_anomalies
+
+async def download_funding(
+    client: httpx.AsyncClient, symbol: str, start_ms: int, end_exclusive_ms: int
+) -> list[FundingRate]:
+    """Download historical Binance funding settlements in 1,000-row pages."""
+    cursor = start_ms
+    records: dict[int, FundingRate] = {}
+    pages = 0
+    while cursor < end_exclusive_ms:
+        pages += 1
+        if pages > 20:
+            raise RuntimeError(f"{symbol}: funding pagination exceeded safety page limit")
+        rows = await get_json(client, "/fapi/v1/fundingRate", {
+            "symbol": symbol,
+            "startTime": cursor,
+            "endTime": end_exclusive_ms - 1,
+            "limit": 1000,
+        })
+        if not isinstance(rows, list):
+            raise RuntimeError(f"{symbol}: malformed Binance funding response")
+        if not rows:
+            break
+        times = []
+        for row in rows:
+            t = int(row["fundingTime"])
+            mark = float(row.get("markPrice") or 0)
+            rate = float(row["fundingRate"])
+            if start_ms <= t < end_exclusive_ms:
+                if mark <= 0:
+                    raise RuntimeError(f"{symbol}: invalid funding mark price at {t}")
+                records[t] = FundingRate(t, rate, mark)
+                times.append(t)
+        if not times:
+            break
+        newest = max(times)
+        if newest < cursor:
+            raise RuntimeError(f"{symbol}: funding pagination made no progress")
+        cursor = newest + 1
+        await asyncio.sleep(0.08)
+        if len(rows) < 1000:
+            break
+    return [records[t] for t in sorted(records)]
+
 
 def save_candles(rows: list[Candle], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -128,7 +172,7 @@ def save_candles(rows: list[Candle], path: Path) -> None:
             })
 
 
-def funding_audit(rows: list[Any], start_ms: int, end_ms: int) -> dict:
+def funding_audit(rows: list[FundingRate], start_ms: int, end_ms: int) -> dict:
     times = [x.funding_time_ms for x in rows]
     gaps = [b - a for a, b in zip(times, times[1:])]
     median_gap = int(statistics.median(gaps)) if gaps else None
@@ -156,6 +200,7 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
         "# SignalHub two-year futures backtest",
         "",
         f"- Test window: {result['test_window_utc']['start']} to {result['test_window_utc']['end']} (UTC, end exclusive)",
+        "- Market data: **Binance USDⓈ-M perpetuals** (cross-venue benchmark; not Bitunix fills)",
         f"- Initial capital: **$ {result['initial_equity']:,.2f}**",
         f"- Final capital: **$ {result['final_equity']:,.2f}**",
         f"- Net PnL: **$ {result['net_pnl_quote']:,.2f} ({result['net_return_pct']:.2f}%)**",
@@ -165,13 +210,14 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
         f"- Profit factor: **{result['profit_factor']}**",
         f"- Maximum drawdown: **{result['max_drawdown_pct']:.2f}%**",
         "",
-        "## Assumptions",
+        "## Assumptions and limitations",
         "",
         "- Strategy: repository backtest implementation (1D bias + 4H structure + 1H SMC/ICT trigger).",
-        "- Price series: Bitunix MARK_PRICE OHLC for all 1H bars; quote/base volume fields from LAST_PRICE candles. Execution proxy uses next 1H MARK_PRICE open; max holding period 48 bars; stop is assumed hit before target if both touch in one candle.",
-        "- Risk: 0.5% of equity budget per trade, 2x maximum leverage, maximum 5 concurrent positions and 2% portfolio open-risk cap.",
-        "- Costs: 5 bps fee + 2 bps slippage per side; historical Bitunix funding rates applied at recorded settlements.",
-        "- The 15m Price Action filter in the live scan path is not present in this current historical backtest implementation. Mark-price execution is a proxy, not an actual last-trade fill.",
+        "- Execution: next 1H open; max holding period 48 hourly bars; stop is assumed hit before target if both touch in one candle.",
+        "- Risk: 0.5% risk budget per trade, 2x maximum leverage, maximum 5 concurrent positions and 2% portfolio open-risk cap.",
+        "- Costs: 5 bps fee + 2 bps slippage per side; Binance historical funding rates applied at recorded settlements.",
+        "- The 15m Price Action filter in the live scan path is not present in the current historical backtest implementation.",
+        "- Cross-venue limitation: prices, funding, liquidity and execution may differ from Bitunix. This is a benchmark, not an exact Bitunix simulation.",
         "- No liquidation engine, maintenance-margin tiers, cross-symbol correlation model or intrabar order-book simulation.",
         "",
         "## Per-symbol performance",
@@ -184,12 +230,17 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
             f"| {symbol} | {row['candidate_trades']} | {row['accepted_trades']} | "
             f"{row['wins']} | {row['losses']} | {row['net_pnl_quote']:.2f} |"
         )
-    lines.extend(["", "## Data integrity", "", "| Symbol | 1H candles | Candle audit | Funding records | Funding audit |", "|---|---:|---|---:|---|"])
+    lines.extend([
+        "",
+        "## Data integrity",
+        "",
+        "| Symbol | 1H candles | Candle audit | Funding records | Funding audit |",
+        "|---|---:|---|---:|---|",
+    ])
     for symbol, row in data_audit.items():
         lines.append(
             f"| {symbol} | {row['candles']} | {row['candle_status']} "
-            f"(LAST_PRICE OHLC anomalies: {row.get('last_price_ohlc_anomaly_count', 0)}) | "
-            f"{row['funding']['records']} | {row['funding']['status']} |"
+            f"(gaps: {row['candle_gaps']}) | {row['funding']['records']} | {row['funding']['status']} |"
         )
     lines.extend([
         "",
@@ -213,72 +264,69 @@ async def run(args: argparse.Namespace) -> None:
     if test_end <= test_start + 100 * DAY_MS:
         raise ValueError("Backtest period is too short")
     warmup_start = test_start - 60 * DAY_MS
-    # Stop opening new positions 48h before the end so every trade can complete
-    # within the requested test window using the engine's 48-bar time exit.
     decision_end = test_end - 48 * HOUR_MS
 
-    client = BitunixClient(
-        settings.bitunix_futures_base_url,
-        settings.bitunix_spot_base_url,
-        settings.request_timeout_seconds,
-    )
-    tickers = await client.futures_tickers()
-    listed = {str(x.get("symbol", "")).upper() for x in tickers}
-    missing = sorted(set(symbols) - listed)
-    if missing:
-        raise RuntimeError(f"These requested perpetual symbols are not listed on Bitunix: {missing}")
-
-    candles_by_symbol: dict[str, list[Candle]] = {}
-    funding_by_symbol: dict[str, list[Any]] = {}
-    audit: dict[str, dict] = {}
-    raw_dir = Path("artifacts/historical_data")
-    for index, symbol in enumerate(symbols, start=1):
-        print(f"[{index}/10] Downloading {symbol} 1h candles...", flush=True)
-        candles, last_price_anomalies = await download_hourly(client, symbol, warmup_start, test_end)
-        candle_audit = audit_candles(candles, HOUR_MS)
-        if candles[0].time_ms > warmup_start or candles[-1].time_ms < test_end - HOUR_MS:
-            raise RuntimeError(f"{symbol}: historical candle boundary coverage is incomplete")
-        if candle_audit["invalid_count"] or candle_audit["duplicate_timestamps_ms"] or candle_audit["discontinuities"]:
-            raise RuntimeError(
-                f"{symbol}: candle quality gate failed: {json.dumps(candle_audit)}"
-            )
-        candles_by_symbol[symbol] = validated_candles(candles, HOUR_MS)
-        save_candles(candles, raw_dir / f"{symbol}_1h.csv")
-
-        print(f"[{index}/10] Downloading {symbol} historical funding...", flush=True)
-        funding = await download_funding(symbol, test_start, test_end)
-        if not funding:
-            raise RuntimeError(f"{symbol}: no historical funding data; refusing incomplete futures backtest")
-        funding_by_symbol[symbol] = funding
-        save_funding_csv(funding, raw_dir / f"{symbol}_funding.csv")
-        funding_check = funding_audit(funding, test_start, test_end)
-        audit[symbol] = {
-            "candles": len(candles),
-            "first_candle_utc": datetime.fromtimestamp(candles[0].time_ms / 1000, timezone.utc).isoformat(),
-            "last_candle_utc": datetime.fromtimestamp(candles[-1].time_ms / 1000, timezone.utc).isoformat(),
-            "candle_status": "PASS",
-            "candle_gaps": len(candle_audit["discontinuities"]),
-            "last_price_ohlc_anomaly_count": len(last_price_anomalies),
-            "last_price_ohlc_anomalies": last_price_anomalies,
-            "price_source": "Bitunix MARK_PRICE OHLC",
-            "volume_source": "Bitunix LAST_PRICE volume",
-            "funding": funding_check,
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        exchange_info = await get_json(client, "/fapi/v1/exchangeInfo")
+        tradable = {
+            row["symbol"] for row in exchange_info.get("symbols", [])
+            if row.get("status") == "TRADING"
+            and row.get("contractType") == "PERPETUAL"
+            and row.get("quoteAsset") == "USDT"
         }
+        missing = sorted(set(symbols) - tradable)
+        if missing:
+            raise RuntimeError(f"Requested Binance USDT perpetuals unavailable: {missing}")
 
-    print("Running shared-equity portfolio simulation...", flush=True)
-    result = run_portfolio_backtest(
-        candles_by_symbol=candles_by_symbol,
-        funding_by_symbol=funding_by_symbol,
-        start_ms=test_start,
-        end_ms=decision_end,
-        fee_bps=args.fee_bps,
-        slippage_bps=args.slippage_bps,
-        risk_pct=args.risk_pct,
-        max_leverage=args.max_leverage,
-        initial_equity=args.initial_equity,
-        max_positions=args.max_positions,
-        max_open_risk_pct=args.max_open_risk_pct,
-    )
+        candles_by_symbol: dict[str, list[Candle]] = {}
+        funding_by_symbol: dict[str, list[FundingRate]] = {}
+        audit: dict[str, dict] = {}
+        raw_dir = Path("artifacts/historical_data")
+        for index, symbol in enumerate(symbols, start=1):
+            print(f"[{index}/10] Downloading {symbol} Binance 1h perpetual candles...", flush=True)
+            candles = await download_hourly(client, symbol, warmup_start, test_end)
+            candle_audit = audit_candles(candles, HOUR_MS)
+            if candles[0].time_ms > warmup_start or candles[-1].time_ms < test_end - HOUR_MS:
+                raise RuntimeError(f"{symbol}: historical candle boundary coverage is incomplete")
+            if candle_audit["invalid_count"] or candle_audit["duplicate_timestamps_ms"] or candle_audit["discontinuities"]:
+                raise RuntimeError(
+                    f"{symbol}: candle quality gate failed: {json.dumps(candle_audit)}"
+                )
+            candles_by_symbol[symbol] = validated_candles(candles, HOUR_MS)
+            save_candles(candles, raw_dir / f"{symbol}_1h.csv")
+
+            print(f"[{index}/10] Downloading {symbol} Binance historical funding...", flush=True)
+            funding = await download_funding(client, symbol, test_start, test_end)
+            if not funding:
+                raise RuntimeError(f"{symbol}: no historical funding data; refusing incomplete futures backtest")
+            funding_by_symbol[symbol] = funding
+            save_funding_csv(funding, raw_dir / f"{symbol}_funding.csv")
+            funding_check = funding_audit(funding, test_start, test_end)
+            audit[symbol] = {
+                "candles": len(candles),
+                "first_candle_utc": datetime.fromtimestamp(candles[0].time_ms / 1000, timezone.utc).isoformat(),
+                "last_candle_utc": datetime.fromtimestamp(candles[-1].time_ms / 1000, timezone.utc).isoformat(),
+                "candle_status": "PASS",
+                "candle_gaps": len(candle_audit["discontinuities"]),
+                "price_source": "Binance USDⓈ-M perpetual klines",
+                "funding_source": "Binance USDⓈ-M fundingRate history",
+                "funding": funding_check,
+            }
+
+        print("Running shared-equity portfolio simulation...", flush=True)
+        result = run_portfolio_backtest(
+            candles_by_symbol=candles_by_symbol,
+            funding_by_symbol=funding_by_symbol,
+            start_ms=test_start,
+            end_ms=decision_end,
+            fee_bps=args.fee_bps,
+            slippage_bps=args.slippage_bps,
+            risk_pct=args.risk_pct,
+            max_leverage=args.max_leverage,
+            initial_equity=args.initial_equity,
+            max_positions=args.max_positions,
+            max_open_risk_pct=args.max_open_risk_pct,
+        )
 
     per_symbol = {}
     for symbol in symbols:
@@ -303,8 +351,8 @@ async def run(args: argparse.Namespace) -> None:
     result["assumptions"] = {
         "symbols": symbols,
         "timeframe": "1H execution; 1D/4H/1H SMC strategy",
-        "price_source": "Bitunix MARK_PRICE OHLC",
-        "volume_source": "Bitunix LAST_PRICE volume",
+        "price_source": "Binance USDⓈ-M perpetual OHLCV",
+        "funding_source": "Binance USDⓈ-M historical funding",
         "initial_equity_quote": args.initial_equity,
         "max_leverage": args.max_leverage,
         "risk_pct_per_trade": args.risk_pct,
@@ -312,10 +360,10 @@ async def run(args: argparse.Namespace) -> None:
         "max_open_risk_pct": args.max_open_risk_pct,
         "fee_bps_per_side": args.fee_bps,
         "slippage_bps_per_side": args.slippage_bps,
-        "funding": "historical Bitunix funding records; see per-symbol data audit",
         "warmup_days": 60,
         "time_exit_bars": 48,
         "15m_price_action_filter": "not included in current app.backtest.py implementation",
+        "execution_venue_limitation": "Binance data used as cross-venue benchmark; not Bitunix exact fills",
     }
     output = Path(args.output)
     write_report(result, audit, output)
@@ -335,8 +383,7 @@ def main() -> None:
     parser.add_argument("--fee-bps", type=float, default=5.0)
     parser.add_argument("--slippage-bps", type=float, default=2.0)
     parser.add_argument("--output", default="artifacts/report")
-    args = parser.parse_args()
-    asyncio.run(run(args))
+    asyncio.run(run(parser.parse_args()))
 
 
 if __name__ == "__main__":
