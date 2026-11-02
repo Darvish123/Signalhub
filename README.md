@@ -1,17 +1,27 @@
-# SignalHub — Bitunix Futures Research MVP 0.3
+# SignalHub — Bitunix Futures Research MVP 0.8
 
-Read-only market research and signal-candidate screening. No private credentials, order placement, withdrawals or automated execution.
+Read-only market research, multi-timeframe signal screening and paper risk sizing. No private credentials, order placement, withdrawals or automated execution.
 
-## Capabilities
-- Public Bitunix Futures tickers and OHLCV candles.
-- Bounded scan of up to 20 liquid USDT perpetuals.
-- Multi-timeframe filter: 4h EMA regime, 1h alignment, 15m momentum and ATR volatility guard.
-- Structural pivot-based stop/target candidates and estimated RR.
-- SMC context: confirmed swings/HH-HL-LH-LL, BOS/CHoCH, single-consumption liquidity sweep events, three-candle FVG, Order Block candidate with mitigation/invalidation lifecycle, and Premium/Discount from the latest adjacent confirmed opposite swing pair.
-- SQLite signal history, FastAPI docs, Docker and CI.
+## Integrated signal pipeline
+- Public Bitunix Futures ticker and OHLCV retrieval.
+- 1D directional bias (EMA20/EMA50).
+- 4H confirmed SMC structure alignment.
+- 1H BOS/CHoCH, liquidity sweep/FVG and ICT-style sweep → displacement/MSS → FVG retracement confluence.
+- 15m closed-candle price-action trigger.
+- Structural invalidation stop, net reward/risk and rolling 24-closed-hour quote-volume gate.
+- Fail-closed handling: insufficient, invalid, stale or incomplete inputs produce NO_TRADE / DATA_ERROR rather than a forced signal.
 
-## SMC definitions and limitations
-All SMC labels are deterministic candle heuristics, not proof of institutional orders or intent. Pivots become available only after right-side confirmation candles. BOS/CHoCH are close-based breaks without displacement validation. Sweeps consume a pivot after first sweep. FVGs are geometric gaps, not automatic entries. OB mitigation means a later candle overlaps the zone; invalidation means a close beyond its distal boundary. OB selection remains heuristic and does not yet require displacement/FVG confluence. Premium/Discount uses an adjacent confirmed high/low pair and is not a fully modelled dealing-range/leg algorithm.
+SMC/ICT/price-action detections are deterministic OHLC heuristics, not proof of institutional orders, intent or predictive edge.
+
+## Risk engine
+Every scan candidate passes through `app.risk.evaluate_signal_risk` before storage/return:
+- Validates direction, entry and stop geometry.
+- Sizes notional and quantity from configured paper equity and risk budget.
+- Includes configured estimated round-trip friction in the risk budget.
+- Enforces maximum leverage and optional absolute notional cap.
+- Converts failed risk checks into NO_TRADE and stores the risk decision with the signal.
+
+Defaults are paper assumptions, not account facts: PAPER_EQUITY_QUOTE=1000, RISK_PER_TRADE_PCT=0.5, MAX_LEVERAGE=1.0, ROUND_TRIP_COST_BPS=14. No exchange balance is queried. No portfolio open-position exposure is available to the live scanner yet. The separate event-driven portfolio backtest applies shared equity, max concurrent positions and aggregate open-risk limits, but does not model correlation or liquidation tiers.
 
 ## Run
 ```bash
@@ -33,26 +43,17 @@ Open http://127.0.0.1:8000/docs.
 - GET /v1/signals
 - GET /v1/signals/{id}
 
-## Data quality controls
-- OHLCV values must be finite and valid; timestamps must be unique and ordered.
-- Scan/SMC analysis rejects stale/future candle series and gaps larger than 1.5 timeframe intervals.
-- Freshness thresholds are conservative engineering guards, not guarantees that the exchange feed is correct. Historical kline endpoint is intentionally not freshness-filtered.
+## Backtesting
+The repository includes a single-position 1H execution backtest with 1D/4H/1H SMC strategy, risk-budget sizing and historical funding accounting, plus a separate event-driven multi-symbol portfolio allocator. These are research tools; run them on verified historical datasets and inspect funding coverage before interpreting results.
 
-## Validation and known limitations
-- Run `python -m unittest discover -s tests -v` and `python -m scripts.smoke` (read-only) before local use.
-- CI passing only verifies tests/compilation; it does not prove profitability or validate live Bitunix compatibility.
-- Strategy remains a screening heuristic. No historical backtest, walk-forward test or forward paper-trading evidence.
-- Fee model is still a placeholder; spread, slippage, actual fee tier and funding are not modelled.
-- No OI, funding, liquidation, order-book, portfolio risk sizing, aggregate exposure, dashboard, alerts, authentication or trade lifecycle.
-- Spot is not integrated. No order endpoint exists.
-- Do not expose this unauthenticated API publicly; use locally or behind a trusted private network.
+## Validation and limitations
+- Run `python -m unittest discover -s tests -v` and `python -m compileall -q app scripts`.
+- CI passing verifies tests/compilation only; it does not prove profitability, live API correctness or deployment.
+- No walk-forward/robust out-of-sample evidence or forward paper-trading track record is claimed.
+- Fee/slippage assumptions must be calibrated to the actual account/market. Funding history completeness must be checked.
+- Live scanner does not yet aggregate open positions, correlation, account margin, liquidation buffers or exchange-specific risk tiers.
+- No trade lifecycle tracker, authentication, user roles, alerting or production monitoring.
+- Do not expose this unauthenticated API publicly. No order endpoint exists.
 
-## Next gates before any trading consideration
-1. Verify live public API payloads, candle timestamp semantics, rate limits and reconnect behaviour.
-2. Add OB displacement/imbalance validation and coherent external/internal dealing ranges.
-3. Integrate SMC confluence only after objective definitions and out-of-sample tests.
-4. Build event-driven backtest with fees, spread, slippage and funding.
-5. Run forward paper trading, track signal lifecycle and report drawdown/expectancy.
-6. Add sizing, portfolio exposure/correlation limits, auth, monitoring, alerts and UI.
-7. Validate Spot in a separate engine.
-No automated execution without separate security, risk and user approval.
+## Safety
+SignalHub remains read-only. Risk outputs are paper estimates, not a promise of maximum realized loss: gaps, liquidity, slippage, fees, funding and exchange mechanics can increase losses. No automated execution without separate security, risk and explicit user approval.
