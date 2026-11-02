@@ -57,3 +57,14 @@ The repository includes a single-position 1H execution backtest with 1D/4H/1H SM
 
 ## Safety
 SignalHub remains read-only. Risk outputs are paper estimates, not a promise of maximum realized loss: gaps, liquidity, slippage, fees, funding and exchange mechanics can increase losses. No automated execution without separate security, risk and explicit user approval.
+
+
+## Architecture
+
+The FastAPI layer delegates scan orchestration to `app.services.ScanService`.
+The service coordinates the public market-data adapter, pure strategy facade,
+paper risk gate, and SQLite signal repository. Strategy and detector modules
+remain independent of HTTP, network, and persistence concerns.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the dependency direction,
+module ownership, data contracts, safety boundaries, and staged package layout.
