@@ -42,7 +42,7 @@ def parse_utc_date(value: str) -> int:
 async def download_hourly(
     client: BitunixClient, symbol: str, start_ms: int, end_exclusive_ms: int
 ) -> tuple[list[Candle], list[dict]]:
-    """Page backwards; rebuild invalid 1H rows only from four valid 15m rows."""
+    """Page backwards; rebuild invalid 1H rows only from complete valid lower-timeframe rows (15m, 5m or 1m)."""
     cursor = end_exclusive_ms
     records: dict[int, Candle] = {}
     rebuilt: list[dict] = []
@@ -61,30 +61,42 @@ async def download_hourly(
             if candle.valid():
                 records[candle.time_ms] = candle
                 continue
-            # Never adjust a malformed 1H candle. Reconstruct it from the
-            # exchange's four constituent 15m LAST_PRICE candles and validate
-            # every source row before aggregation.
-            parts = await client.futures_klines(
-                symbol, "15m", 4,
-                end_time_ms=candle.time_ms + HOUR_MS,
-                strict_validation=False,
-            )
-            expected = [candle.time_ms + i * 900_000 for i in range(4)]
-            by_time = {x.time_ms: x for x in parts}
-            if len(by_time) != 4 or sorted(by_time) != expected:
+            # Never adjust a malformed 1H candle. Reconstruct it only from
+            # complete, valid lower-timeframe Bitunix LAST_PRICE candles.
+            source = None
+            source_interval = None
+            attempted = []
+            for interval, count, step_ms in (
+                ("15m", 4, 900_000),
+                ("5m", 12, 300_000),
+                ("1m", 60, 60_000),
+            ):
+                parts = await client.futures_klines(
+                    symbol, interval, count,
+                    end_time_ms=candle.time_ms + HOUR_MS,
+                    strict_validation=False,
+                )
+                await asyncio.sleep(0.12)
+                expected = [candle.time_ms + i * step_ms for i in range(count)]
+                by_time = {x.time_ms: x for x in parts}
+                if len(by_time) != count or sorted(by_time) != expected:
+                    attempted.append({"interval": interval, "reason": "incomplete or misaligned source candles"})
+                    continue
+                candidate = [by_time[t] for t in expected]
+                invalid_source = [
+                    {"time_ms": x.time_ms, "issues": candle_issues(x)}
+                    for x in candidate if not x.valid()
+                ]
+                if invalid_source:
+                    attempted.append({"interval": interval, "invalid": invalid_source})
+                    continue
+                source = candidate
+                source_interval = interval
+                break
+            if source is None:
                 raise RuntimeError(
                     f"{symbol}: cannot reconstruct invalid 1H candle at {candle.time_ms}; "
-                    "four contiguous 15m candles were not returned"
-                )
-            source = [by_time[t] for t in expected]
-            invalid_source = [
-                {"time_ms": x.time_ms, "issues": candle_issues(x)}
-                for x in source if not x.valid()
-            ]
-            if invalid_source:
-                raise RuntimeError(
-                    f"{symbol}: invalid 15m source candles while reconstructing "
-                    f"{candle.time_ms}: {json.dumps(invalid_source)}"
+                    f"no complete valid lower-timeframe source: {json.dumps(attempted)}"
                 )
             aggregate = Candle(
                 candle.time_ms, source[0].open, max(x.high for x in source),
@@ -96,6 +108,12 @@ async def download_hourly(
                 raise RuntimeError(
                     f"{symbol}: reconstructed 1H candle failed validation at {candle.time_ms}"
                 )
+            rebuilt.append({
+                "timestamp_ms": candle.time_ms,
+                "original_1h_issues": candle_issues(candle),
+                "reconstructed_from": f"{len(source)} validated Bitunix {source_interval} LAST_PRICE candles",
+            })
+            await asyncio.sleep(0.12)
             records[candle.time_ms] = aggregate
             rebuilt.append({
                 "timestamp_ms": candle.time_ms,
@@ -195,7 +213,7 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
     for symbol, row in data_audit.items():
         lines.append(
             f"| {symbol} | {row['candles']} | {row['candle_status']} "
-            f"(15m rebuilds: {row.get('reconstructed_from_15m_count', 0)}) | "
+            f"(lower-TF rebuilds: {row.get('reconstructed_from_15m_count', 0)}) | "
             f"{row['funding']['records']} | {row['funding']['status']} |"
         )
     lines.extend([
