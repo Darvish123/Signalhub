@@ -302,7 +302,9 @@ async def run(args: argparse.Namespace) -> None:
     }
     result["assumptions"] = {
         "symbols": symbols,
-        "timeframe": "1H execution; 1D/4H/1H SMC strategy",\n        "price_source": "Bitunix MARK_PRICE OHLC",\n        "volume_source": "Bitunix LAST_PRICE volume",
+        "timeframe": "1H execution; 1D/4H/1H SMC strategy",
+        "price_source": "Bitunix MARK_PRICE OHLC",
+        "volume_source": "Bitunix LAST_PRICE volume",
         "initial_equity_quote": args.initial_equity,
         "max_leverage": args.max_leverage,
         "risk_pct_per_trade": args.risk_pct,
@@ -314,8 +316,6 @@ async def run(args: argparse.Namespace) -> None:
         "warmup_days": 60,
         "time_exit_bars": 48,
         "15m_price_action_filter": "not included in current app.backtest.py implementation",
-        "price_source": "Bitunix MARK_PRICE OHLC",
-        "volume_source": "Bitunix LAST_PRICE volume",
     }
     output = Path(args.output)
     write_report(result, audit, output)
