@@ -36,4 +36,14 @@ class BacktestTests(unittest.TestCase):
   self.assertLess(result["trades"][0]["funding_pnl_pct_equity"],0)
   self.assertEqual(result["trades"][0]["exit_reason"],"TIME")
 
+ def test_no_trade_reasons_are_counted_for_diagnostics(self):
+  rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(1700)]
+  start=rows[1500].time_ms
+  no_trade=Signal(symbol="TESTUSDT",market="FUTURES",side="NONE",status="NO_TRADE",
+      score=0,entry=None,stop_loss=None,take_profit_1=None,take_profit_2=None,
+      net_rr=None,reasons=[],risks=["1D trend is not aligned"],created_at_ms=start)
+  with patch("app.backtest.analyse",return_value=no_trade):
+   result=run_backtest(rows,"TESTUSDT",start,rows[-1].time_ms)
+  self.assertGreater(result["signal_diagnostics"].get("1D trend is not aligned",0),0)
+
 if __name__=="__main__": unittest.main()
