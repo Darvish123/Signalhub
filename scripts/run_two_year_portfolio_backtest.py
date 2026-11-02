@@ -20,7 +20,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import settings
-from app.exchange import BitunixClient
+from app.exchange import BitunixClient, InvalidMarketDataError
 from app.funding import download_funding, save_funding_csv
 from app.models import Candle
 from app.portfolio import run_portfolio_backtest
@@ -50,9 +50,17 @@ async def download_hourly(
         pages += 1
         if pages > 1500:
             raise RuntimeError(f"{symbol}: candle pagination exceeded safety page limit")
-        batch = await client.futures_klines(
-            symbol, "1h", 200, end_time_ms=cursor
-        )
+        try:
+            batch = await client.futures_klines(
+                symbol, "1h", 200, end_time_ms=cursor
+            )
+        except InvalidMarketDataError as exc:
+            print(
+                f"{symbol}: exchange returned invalid historical OHLCV rows: "
+                + json.dumps(exc.invalid),
+                flush=True,
+            )
+            raise
         eligible = [c for c in batch if start_ms <= c.time_ms < cursor]
         if not eligible:
             break
