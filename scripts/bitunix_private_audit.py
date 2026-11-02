@@ -1,16 +1,18 @@
 """Run a local read-only Bitunix Futures account connectivity audit.
 
-Set BITUNIX_API_KEY and BITUNIX_API_SECRET in the process environment or .env.
+Credentials are read from environment variables or the local .env file.
 Only status and record counts are printed; no account details are displayed.
 """
 import asyncio
-import os
+from app.config import settings
 from app.bitunix_private import BitunixPrivateReadOnlyClient
 
 async def main():
     client = BitunixPrivateReadOnlyClient(
-        api_key=os.environ.get("BITUNIX_API_KEY", ""),
-        secret_key=os.environ.get("BITUNIX_API_SECRET", ""),
+        api_key=settings.bitunix_api_key,
+        secret_key=settings.bitunix_api_secret,
+        base_url=settings.bitunix_futures_base_url,
+        timeout=settings.request_timeout_seconds,
     )
     positions, orders, tp_sl = await asyncio.gather(
         client.get_open_positions(),
