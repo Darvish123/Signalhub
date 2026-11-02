@@ -1,0 +1,32 @@
+name: Bitunix public connectivity
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feature/risk-sizing-v0.6"
+jobs:
+  bitunix-public-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Check public Bitunix Futures API
+        run: python -m scripts.check_bitunix_connection
+      - name: Audit 500 BTC candles across timeframes and price types
+        run: python -m scripts.audit_bitunix_btc_market_data
+      - name: Upload complete market-data audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitunix-btc-market-audit
+          path: artifacts/bitunix_btc_market_audit.json
+          if-no-files-found: warn
