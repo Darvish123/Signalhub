@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = 12.0
     min_quote_volume_24h: float = 1_000_000
     min_score: int = 70
-    min_net_rr: float = 2.0
+    min_net_rr: float = 3.0
+    paper_equity_quote: float = 1000.0
+    risk_per_trade_pct: float = 0.5
+    max_leverage: float = 1.0
+    max_notional_quote: float = 0.0
+    round_trip_cost_bps: float = 14.0
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 settings = Settings()
