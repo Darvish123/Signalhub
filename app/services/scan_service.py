@@ -9,23 +9,35 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import replace
-from typing import Any
+from typing import Any, Protocol
+
+from app.models import Candle, Signal
 
 from app.exchange import (
-    BitunixClient,
     ExchangeError,
     INTERVAL_MS,
     validate_fresh_candles,
 )
 from app.risk import evaluate_signal_risk
-from app.storage import SignalStore
 from app.strategy import analyse
+
+
+class MarketDataProvider(Protocol):
+    async def futures_klines(
+        self, symbol: str, interval: str, limit: int
+    ) -> list[Candle]: ...
+
+    async def futures_tickers(self) -> list[dict[str, Any]]: ...
+
+
+class SignalRepository(Protocol):
+    def save(self, signal: Signal) -> int: ...
 
 
 class ScanService:
     """Coordinate one-symbol and bounded-universe read-only scans."""
 
-    def __init__(self, client: BitunixClient, store: SignalStore, settings: Any):
+    def __init__(self, client: MarketDataProvider, store: SignalRepository, settings: Any):
         self.client = client
         self.store = store
         self.settings = settings
@@ -85,6 +97,8 @@ class ScanService:
         return {"id": signal_id, **signal.to_dict()}
 
     async def scan_universe(self, limit: int = 10) -> dict:
+        if not 1 <= limit <= 20:
+            raise ValueError("Universe scan limit must be between 1 and 20")
         tickers_data = await self.client.futures_tickers()
         ranked = []
         for row in tickers_data:
