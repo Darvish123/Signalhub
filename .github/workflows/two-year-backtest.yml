@@ -4,13 +4,6 @@ on:
   push:
     branches:
       - research/backtest-two-years
-    paths:
-      - "scripts/run_two_year_portfolio_backtest.py"
-      - ".github/workflows/two-year-backtest.yml"
-      - "app/backtest.py"
-      - "app/portfolio.py"
-      - "app/funding.py"
-      - "app/strategy.py"
   workflow_dispatch:
     inputs:
       start_date:
