@@ -1,5 +1,6 @@
 """Single-position 1H execution backtest with 1D/4H/1H SMC and historical funding."""
 import argparse,csv,json
+from bisect import bisect_right
 from collections import Counter
 from dataclasses import asdict,dataclass
 from datetime import datetime,timezone
@@ -62,7 +63,8 @@ def position_fraction_for_risk(entry:float,stop:float,risk_pct:float,max_leverag
 
 def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps:float=5.,slippage_bps:float=2.,
                  risk_pct:float=.5,max_hold_bars:int=48,max_leverage:float=1.,
-                 funding_rates:list[FundingRate]|None=None,initial_equity:float=100.)->dict:
+                 funding_rates:list[FundingRate]|None=None,initial_equity:float=100.,
+                 lower_tf_candles:list[Candle]|None=None)->dict:
     if fee_bps<0 or slippage_bps<0 or not 0<risk_pct<=2 or max_hold_bars<1 or not 0<max_leverage<=5 or initial_equity<=0:
         raise ValueError("Invalid backtest configuration")
     candles=validated_candles(candles,3600000)
@@ -77,18 +79,28 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         if any(x.mark_price<=0 for x in funding_rates):
             raise ValueError("Funding mark prices must be positive")
     h4=aggregate(candles,14400000); d1=aggregate(candles,86400000)
+    h4_close_times=[x.time_ms+14400000 for x in h4]
+    d1_close_times=[x.time_ms+86400000 for x in d1]
+    lower=validated_candles(lower_tf_candles,900000) if lower_tf_candles is not None else None
+    lower_times=[x.time_ms for x in lower] if lower is not None else []
     funding=sorted(funding_rates or [],key=lambda x:x.funding_time_ms)
     trades=[]; diagnostics=Counter(); i=0; cost=(fee_bps+slippage_bps)/10000
     while i<len(candles)-1:
         decision=candles[i].time_ms+3600000
         if decision<start_ms or decision>end_ms: i+=1; continue
-        closed4=[x for x in h4 if x.time_ms+14400000<=decision]
-        closed1d=[x for x in d1 if x.time_ms+86400000<=decision]
-        closed1h=candles[:i+1]
+        n4=bisect_right(h4_close_times,decision); nd=bisect_right(d1_close_times,decision)
+        closed4=h4[max(0,n4-200):n4]
+        closed1d=d1[max(0,nd-160):nd]
+        closed1h=candles[max(0,i-199):i+1]
         if min(len(closed4),len(closed1d),len(closed1h))<60: i+=1; continue
-        sig=analyse(symbol,"FUTURES",closed1d[-160:],closed4[-200:],closed1h[-200:],
+        lower_window=None
+        if lower is not None:
+            n15=bisect_right(lower_times,decision-900000)
+            lower_window=lower[max(0,n15-200):n15]
+        sig=analyse(symbol,"FUTURES",closed1d,closed4,closed1h,
                     min_score=70,min_rr=3.,min_quote_volume=1_000_000,
-                    round_trip_cost_bps=2*(fee_bps+slippage_bps),now_ms=decision)
+                    round_trip_cost_bps=2*(fee_bps+slippage_bps),now_ms=decision,
+                    lower_tf=lower_window)
         if sig.status!="CANDIDATE" or sig.side not in ("LONG","SHORT") or None in (sig.stop_loss,sig.take_profit_1):
             reason=(sig.risks[0] if sig.risks else sig.status or "UNKNOWN_SIGNAL_REJECTION")
             diagnostics[reason]+=1
@@ -129,11 +141,12 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         i=exit_idx+1
     report=stats(trades,start_ms,end_ms,initial_equity)
     expected_settlements=sum(start_ms<=x.funding_time_ms<=end_ms for x in funding)
-    report.update({"symbol":symbol,"timeframe":"1H execution; 1D/4H/1H SMC","strategy":"SMC: 1D bias + 4H BOS/CHoCH + 1H BOS/CHoCH and sweep/FVG; structural swing invalidation stop; 3R target",
+    report.update({"symbol":symbol,"timeframe":"1H execution; 1D/4H/1H SMC + closed 15m PA trigger" if lower is not None else "1H execution; 1D/4H/1H SMC (15m PA not supplied)","strategy":"SMC: 1D bias + 4H BOS/CHoCH + 1H BOS/CHoCH and sweep/FVG; optional 15m closed-candle PA; structural swing invalidation stop; 3R target",
       "fee_bps_per_side":fee_bps,"slippage_bps_per_side":slippage_bps,"risk_pct_per_trade":risk_pct,"max_leverage":max_leverage,
       "initial_equity":initial_equity,"funding_records_loaded":len(funding),"funding_settlements_in_test_window":expected_settlements,
       "funding":"HISTORICAL rates applied at settlements while position open" if funding else "MISSING - do not treat as full-cost futures result",
       "execution":"next 1H open; adverse costs; stop first if stop and target touched in same candle",
+      "lower_timeframe_price_action":"ENABLED: latest fully closed 15m candles passed at each hourly decision" if lower is not None else "DISABLED: no 15m dataset supplied",
       "signal_diagnostics":dict(sorted(diagnostics.items(),key=lambda x:(-x[1],x[0]))),
       "trades":[asdict(t) for t in trades]})
     return report
