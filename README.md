@@ -44,7 +44,7 @@ Open http://127.0.0.1:8000/docs.
 - GET /v1/signals/{id}
 
 ## Backtesting
-The repository includes a single-position 1H execution backtest with 1D/4H/1H SMC strategy, risk-budget sizing and historical funding accounting, plus a separate event-driven multi-symbol portfolio allocator. These are research tools; run them on verified historical datasets and inspect funding coverage before interpreting results.
+The repository includes a single-position 1H execution backtest with 1D/4H/1H SMC strategy, risk-budget sizing and historical funding accounting, plus a separate event-driven multi-symbol portfolio allocator. These are research tools; run them on verified historical datasets and inspect funding coverage before interpreting results. The portfolio report also includes per-symbol hourly signal-rejection diagnostics so a zero-trade run can be traced to the exact strategy gate without weakening the live or backtest rules.
 
 ## Validation and limitations
 - Run `python -m unittest discover -s tests -v` and `python -m compileall -q app scripts`.
