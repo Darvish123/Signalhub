@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - research/backtest-two-years
+      - research/backtest-diagnostics
   workflow_dispatch:
     inputs:
       start_date:
