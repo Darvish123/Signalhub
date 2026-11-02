@@ -12,6 +12,7 @@ class BacktestTests(unittest.TestCase):
   self.assertAlmostEqual(position_fraction_for_risk(100,98,.5,1.),.25)
   self.assertEqual(position_fraction_for_risk(100,99.99,.5,1.),1.)
   with self.assertRaises(ValueError): position_fraction_for_risk(100,100,.5,1.)
+  self.assertAlmostEqual(position_fraction_for_risk(100,98,.5,2.,.0014),.005/.0214)
  def test_funding_report_tracks_loaded_settlements(self):
   rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(1600)]
   rates=[FundingRate(rows[1500].time_ms+1,.001,100)]
