@@ -5,6 +5,9 @@ on:
     branches:
       - research/backtest-two-years
       - research/backtest-diagnostics
+  pull_request:
+    branches:
+      - research/backtest-two-years
   workflow_dispatch:
     inputs:
       start_date:
