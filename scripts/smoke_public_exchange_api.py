@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only smoke test: Bitunix ticker universe + OKX candle provider + Bitunix candle diagnostics."""
+"""Read-only smoke test: Bitunix ticker universe + all live OKX timeframes + Bitunix candle diagnostics."""
 from __future__ import annotations
 
 import argparse
@@ -43,7 +43,8 @@ async def probe(symbol: str) -> dict:
         result["ticker"] = {"status": "ERROR", "error": str(exc)}
 
     now_ms = time.time_ns() // 1_000_000
-    for interval in ("1h", "15m"):
+    # These are exactly the four timeframes consumed by the live strategy.
+    for interval in ("1d", "4h", "1h", "15m"):
         try:
             rows = await okx.futures_klines(symbol, interval, limit=100)
             validate_fresh_candles(rows, interval, now_ms)
@@ -59,6 +60,9 @@ async def probe(symbol: str) -> dict:
         except Exception as exc:
             result["market_klines"][interval] = {"status": "ERROR", "error": str(exc)}
 
+    # Bitunix candle checks remain diagnostic only; its malformed OHLC rows
+    # must not silently become the primary market-data source.
+    for interval in ("1h", "15m"):
         try:
             rows = await bitunix.futures_klines(symbol, interval, limit=100, strict_validation=True)
             validate_fresh_candles(rows, interval, now_ms)
