@@ -11,10 +11,13 @@ import asyncio
 import csv
 import json
 import statistics
-import time
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+# Make repository packages importable when this file is launched by path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import settings
 from app.exchange import BitunixClient
