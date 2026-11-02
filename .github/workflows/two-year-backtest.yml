@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - research/backtest-two-years
+      - research/integrated-backtest
   pull_request:
     branches:
       - research/backtest-two-years
@@ -28,7 +29,7 @@ concurrency:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
