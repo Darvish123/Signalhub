@@ -258,8 +258,10 @@ async def run(args: argparse.Namespace) -> None:
             "last_candle_utc": datetime.fromtimestamp(candles[-1].time_ms / 1000, timezone.utc).isoformat(),
             "candle_status": "PASS",
             "candle_gaps": len(candle_audit["discontinuities"]),
-            "reconstructed_from_15m_count": len(rebuilt_rows),
-            "reconstructed_from_15m": rebuilt_rows,
+            "last_price_ohlc_anomaly_count": len(last_price_anomalies),
+            "last_price_ohlc_anomalies": last_price_anomalies,
+            "price_source": "Bitunix MARK_PRICE OHLC",
+            "volume_source": "Bitunix LAST_PRICE volume",
             "funding": funding_check,
         }
 
@@ -312,6 +314,8 @@ async def run(args: argparse.Namespace) -> None:
         "warmup_days": 60,
         "time_exit_bars": 48,
         "15m_price_action_filter": "not included in current app.backtest.py implementation",
+        "price_source": "Bitunix MARK_PRICE OHLC",
+        "volume_source": "Bitunix LAST_PRICE volume",
     }
     output = Path(args.output)
     write_report(result, audit, output)
