@@ -42,91 +42,72 @@ def parse_utc_date(value: str) -> int:
 async def download_hourly(
     client: BitunixClient, symbol: str, start_ms: int, end_exclusive_ms: int
 ) -> tuple[list[Candle], list[dict]]:
-    """Page backwards; rebuild invalid 1H rows only from complete valid lower-timeframe rows (15m, 5m or 1m)."""
+    """Download mark-price OHLC and last-price volume, paged by exclusive endTime.
+
+    Bitunix LAST_PRICE history has returned malformed OHLC rows. For a consistent
+    price series, this research run uses MARK_PRICE OHLC for every bar, while
+    retaining LAST_PRICE quote/base volume as the liquidity filter input.
+    """
     cursor = end_exclusive_ms
     records: dict[int, Candle] = {}
-    rebuilt: list[dict] = []
+    last_price_anomalies: list[dict] = []
     pages = 0
     while cursor > start_ms:
         pages += 1
         if pages > 1500:
             raise RuntimeError(f"{symbol}: candle pagination exceeded safety page limit")
-        batch = await client.futures_klines(
-            symbol, "1h", 200, end_time_ms=cursor, strict_validation=False
+        last_rows = await client.futures_klines(
+            symbol, "1h", 200, candle_type="LAST_PRICE",
+            end_time_ms=cursor, strict_validation=False,
         )
-        eligible = [c for c in batch if start_ms <= c.time_ms < cursor]
+        await asyncio.sleep(0.12)
+        mark_rows = await client.futures_klines(
+            symbol, "1h", 200, candle_type="MARK_PRICE",
+            end_time_ms=cursor, strict_validation=False,
+        )
+        await asyncio.sleep(0.12)
+
+        mark_by_time = {x.time_ms: x for x in mark_rows}
+        eligible = [x for x in last_rows if start_ms <= x.time_ms < cursor]
         if not eligible:
             break
-        for candle in eligible:
-            if candle.valid():
-                records[candle.time_ms] = candle
-                continue
-            # Never adjust a malformed 1H candle. Reconstruct it only from
-            # complete, valid lower-timeframe Bitunix LAST_PRICE candles.
-            source = None
-            source_interval = None
-            attempted = []
-            for interval, count, step_ms in (
-                ("15m", 4, 900_000),
-                ("5m", 12, 300_000),
-                ("1m", 60, 60_000),
-            ):
-                parts = await client.futures_klines(
-                    symbol, interval, count,
-                    end_time_ms=candle.time_ms + HOUR_MS,
-                    strict_validation=False,
-                )
-                await asyncio.sleep(0.12)
-                expected = [candle.time_ms + i * step_ms for i in range(count)]
-                by_time = {x.time_ms: x for x in parts}
-                if len(by_time) != count or sorted(by_time) != expected:
-                    attempted.append({"interval": interval, "reason": "incomplete or misaligned source candles"})
-                    continue
-                candidate = [by_time[t] for t in expected]
-                invalid_source = [
-                    {"time_ms": x.time_ms, "issues": candle_issues(x)}
-                    for x in candidate if not x.valid()
-                ]
-                if invalid_source:
-                    attempted.append({"interval": interval, "invalid": invalid_source})
-                    continue
-                source = candidate
-                source_interval = interval
-                break
-            if source is None:
+        for last in eligible:
+            mark = mark_by_time.get(last.time_ms)
+            if mark is None:
                 raise RuntimeError(
-                    f"{symbol}: cannot reconstruct invalid 1H candle at {candle.time_ms}; "
-                    f"no complete valid lower-timeframe source: {json.dumps(attempted)}"
+                    f"{symbol}: MARK_PRICE candle missing for LAST_PRICE timestamp {last.time_ms}"
                 )
-            aggregate = Candle(
-                candle.time_ms, source[0].open, max(x.high for x in source),
-                min(x.low for x in source), source[-1].close,
-                sum(x.quote_volume for x in source),
-                sum(x.base_volume for x in source),
+            combined = Candle(
+                last.time_ms, mark.open, mark.high, mark.low, mark.close,
+                last.quote_volume, last.base_volume,
             )
-            if not aggregate.valid():
+            if not combined.valid():
                 raise RuntimeError(
-                    f"{symbol}: reconstructed 1H candle failed validation at {candle.time_ms}"
+                    f"{symbol}: invalid MARK_PRICE OHLC or LAST_PRICE volume at {last.time_ms}: "
+                    f"{json.dumps({'mark': mark.__dict__, 'last': last.__dict__})}"
                 )
-            records[candle.time_ms] = aggregate
-            rebuilt.append({
-                "timestamp_ms": candle.time_ms,
-                "original_1h_issues": candle_issues(candle),
-                "reconstructed_from": f"{len(source)} validated Bitunix {source_interval} LAST_PRICE candles",
-            })
-            await asyncio.sleep(0.12)
+            records[last.time_ms] = combined
+            if not last.valid():
+                last_price_anomalies.append({
+                    "timestamp_ms": last.time_ms,
+                    "last_price_ohlc": {
+                        "open": last.open, "high": last.high,
+                        "low": last.low, "close": last.close,
+                    },
+                    "issues": candle_issues(last),
+                    "used_for_price": False,
+                    "replacement_source": "Bitunix MARK_PRICE OHLC",
+                })
 
-        oldest = min(c.time_ms for c in eligible)
+        oldest = min(x.time_ms for x in eligible)
         if oldest >= cursor:
             raise RuntimeError(f"{symbol}: candle pagination made no progress")
         cursor = oldest
-        await asyncio.sleep(0.12)  # below Bitunix public 10 requests/sec limit
 
     rows = [records[t] for t in sorted(records)]
     if not rows:
         raise RuntimeError(f"{symbol}: no historical 1h candles returned")
-    return rows, rebuilt
-
+    return rows, last_price_anomalies
 
 def save_candles(rows: list[Candle], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -187,10 +168,10 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
         "## Assumptions",
         "",
         "- Strategy: repository backtest implementation (1D bias + 4H structure + 1H SMC/ICT trigger).",
-        "- Execution: next 1H open; max holding period 48 hourly bars; stop is assumed hit before target if both touch in one candle.",
+        "- Price series: Bitunix MARK_PRICE OHLC for all 1H bars; quote/base volume fields from LAST_PRICE candles. Execution proxy uses next 1H MARK_PRICE open; max holding period 48 bars; stop is assumed hit before target if both touch in one candle.",
         "- Risk: 0.5% of equity budget per trade, 2x maximum leverage, maximum 5 concurrent positions and 2% portfolio open-risk cap.",
         "- Costs: 5 bps fee + 2 bps slippage per side; historical Bitunix funding rates applied at recorded settlements.",
-        "- The 15m Price Action filter in the live scan path is not present in this current historical backtest implementation.",
+        "- The 15m Price Action filter in the live scan path is not present in this current historical backtest implementation. Mark-price execution is a proxy, not an actual last-trade fill.",
         "- No liquidation engine, maintenance-margin tiers, cross-symbol correlation model or intrabar order-book simulation.",
         "",
         "## Per-symbol performance",
@@ -207,7 +188,7 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
     for symbol, row in data_audit.items():
         lines.append(
             f"| {symbol} | {row['candles']} | {row['candle_status']} "
-            f"(lower-TF rebuilds: {row.get('reconstructed_lower_tf_count', 0)}) | "
+            f"(LAST_PRICE OHLC anomalies: {row.get('last_price_ohlc_anomaly_count', 0)}) | "
             f"{row['funding']['records']} | {row['funding']['status']} |"
         )
     lines.extend([
@@ -253,7 +234,7 @@ async def run(args: argparse.Namespace) -> None:
     raw_dir = Path("artifacts/historical_data")
     for index, symbol in enumerate(symbols, start=1):
         print(f"[{index}/10] Downloading {symbol} 1h candles...", flush=True)
-        candles, rebuilt_rows = await download_hourly(client, symbol, warmup_start, test_end)
+        candles, last_price_anomalies = await download_hourly(client, symbol, warmup_start, test_end)
         candle_audit = audit_candles(candles, HOUR_MS)
         if candles[0].time_ms > warmup_start or candles[-1].time_ms < test_end - HOUR_MS:
             raise RuntimeError(f"{symbol}: historical candle boundary coverage is incomplete")
@@ -319,7 +300,7 @@ async def run(args: argparse.Namespace) -> None:
     }
     result["assumptions"] = {
         "symbols": symbols,
-        "timeframe": "1H execution; 1D/4H/1H SMC strategy",
+        "timeframe": "1H execution; 1D/4H/1H SMC strategy",\n        "price_source": "Bitunix MARK_PRICE OHLC",\n        "volume_source": "Bitunix LAST_PRICE volume",
         "initial_equity_quote": args.initial_equity,
         "max_leverage": args.max_leverage,
         "risk_pct_per_trade": args.risk_pct,
