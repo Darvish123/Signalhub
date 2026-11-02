@@ -20,11 +20,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import settings
-from app.exchange import BitunixClient, InvalidMarketDataError
+from app.exchange import BitunixClient
 from app.funding import download_funding, save_funding_csv
 from app.models import Candle
 from app.portfolio import run_portfolio_backtest
-from app.data_quality import audit_candles, validated_candles
+from app.data_quality import audit_candles, candle_issues, validated_candles
 
 DEFAULT_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
@@ -41,31 +41,69 @@ def parse_utc_date(value: str) -> int:
 
 async def download_hourly(
     client: BitunixClient, symbol: str, start_ms: int, end_exclusive_ms: int
-) -> list[Candle]:
-    """Page backwards using Bitunix's exclusive endTime and 200-row cap."""
+) -> tuple[list[Candle], list[dict]]:
+    """Page backwards; rebuild invalid 1H rows only from four valid 15m rows."""
     cursor = end_exclusive_ms
     records: dict[int, Candle] = {}
+    rebuilt: list[dict] = []
     pages = 0
     while cursor > start_ms:
         pages += 1
         if pages > 1500:
             raise RuntimeError(f"{symbol}: candle pagination exceeded safety page limit")
-        try:
-            batch = await client.futures_klines(
-                symbol, "1h", 200, end_time_ms=cursor
-            )
-        except InvalidMarketDataError as exc:
-            print(
-                f"{symbol}: exchange returned invalid historical OHLCV rows: "
-                + json.dumps(exc.invalid),
-                flush=True,
-            )
-            raise
+        batch = await client.futures_klines(
+            symbol, "1h", 200, end_time_ms=cursor, strict_validation=False
+        )
         eligible = [c for c in batch if start_ms <= c.time_ms < cursor]
         if not eligible:
             break
         for candle in eligible:
-            records[candle.time_ms] = candle
+            if candle.valid():
+                records[candle.time_ms] = candle
+                continue
+            # Never adjust a malformed 1H candle. Reconstruct it from the
+            # exchange's four constituent 15m LAST_PRICE candles and validate
+            # every source row before aggregation.
+            parts = await client.futures_klines(
+                symbol, "15m", 4,
+                end_time_ms=candle.time_ms + HOUR_MS,
+                strict_validation=False,
+            )
+            expected = [candle.time_ms + i * 900_000 for i in range(4)]
+            by_time = {x.time_ms: x for x in parts}
+            if len(by_time) != 4 or sorted(by_time) != expected:
+                raise RuntimeError(
+                    f"{symbol}: cannot reconstruct invalid 1H candle at {candle.time_ms}; "
+                    "four contiguous 15m candles were not returned"
+                )
+            source = [by_time[t] for t in expected]
+            invalid_source = [
+                {"time_ms": x.time_ms, "issues": candle_issues(x)}
+                for x in source if not x.valid()
+            ]
+            if invalid_source:
+                raise RuntimeError(
+                    f"{symbol}: invalid 15m source candles while reconstructing "
+                    f"{candle.time_ms}: {json.dumps(invalid_source)}"
+                )
+            aggregate = Candle(
+                candle.time_ms, source[0].open, max(x.high for x in source),
+                min(x.low for x in source), source[-1].close,
+                sum(x.quote_volume for x in source),
+                sum(x.base_volume for x in source),
+            )
+            if not aggregate.valid():
+                raise RuntimeError(
+                    f"{symbol}: reconstructed 1H candle failed validation at {candle.time_ms}"
+                )
+            records[candle.time_ms] = aggregate
+            rebuilt.append({
+                "timestamp_ms": candle.time_ms,
+                "original_1h_issues": candle_issues(candle),
+                "reconstructed_from": "4 validated Bitunix 15m LAST_PRICE candles",
+            })
+            await asyncio.sleep(0.12)
+
         oldest = min(c.time_ms for c in eligible)
         if oldest >= cursor:
             raise RuntimeError(f"{symbol}: candle pagination made no progress")
@@ -75,7 +113,7 @@ async def download_hourly(
     rows = [records[t] for t in sorted(records)]
     if not rows:
         raise RuntimeError(f"{symbol}: no historical 1h candles returned")
-    return rows
+    return rows, rebuilt
 
 
 def save_candles(rows: list[Candle], path: Path) -> None:
@@ -156,7 +194,8 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
     lines.extend(["", "## Data integrity", "", "| Symbol | 1H candles | Candle audit | Funding records | Funding audit |", "|---|---:|---|---:|---|"])
     for symbol, row in data_audit.items():
         lines.append(
-            f"| {symbol} | {row['candles']} | {row['candle_status']} | "
+            f"| {symbol} | {row['candles']} | {row['candle_status']} "
+            f"(15m rebuilds: {row.get('reconstructed_from_15m_count', 0)}) | "
             f"{row['funding']['records']} | {row['funding']['status']} |"
         )
     lines.extend([
@@ -202,7 +241,7 @@ async def run(args: argparse.Namespace) -> None:
     raw_dir = Path("artifacts/historical_data")
     for index, symbol in enumerate(symbols, start=1):
         print(f"[{index}/10] Downloading {symbol} 1h candles...", flush=True)
-        candles = await download_hourly(client, symbol, warmup_start, test_end)
+        candles, rebuilt_rows = await download_hourly(client, symbol, warmup_start, test_end)
         candle_audit = audit_candles(candles, HOUR_MS)
         if candles[0].time_ms > warmup_start or candles[-1].time_ms < test_end - HOUR_MS:
             raise RuntimeError(f"{symbol}: historical candle boundary coverage is incomplete")
@@ -226,6 +265,8 @@ async def run(args: argparse.Namespace) -> None:
             "last_candle_utc": datetime.fromtimestamp(candles[-1].time_ms / 1000, timezone.utc).isoformat(),
             "candle_status": "PASS",
             "candle_gaps": len(candle_audit["discontinuities"]),
+            "reconstructed_from_15m_count": len(rebuilt_rows),
+            "reconstructed_from_15m": rebuilt_rows,
             "funding": funding_check,
         }
 
