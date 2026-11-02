@@ -72,7 +72,8 @@ class BitunixClient:
 
     async def futures_klines(self, symbol: str, interval: str, limit: int = 200,
                             candle_type: str = "LAST_PRICE",
-                            end_time_ms: int | None = None) -> list[Candle]:
+                            end_time_ms: int | None = None,
+                            strict_validation: bool = True) -> list[Candle]:
         if interval not in INTERVAL_MS:
             raise ValueError("Unsupported interval")
         if candle_type not in ("LAST_PRICE", "MARK_PRICE"):
@@ -99,7 +100,7 @@ class BitunixClient:
                     "quote_volume": candle.quote_volume, "base_volume": candle.base_volume,
                     "reason": "OHLCV invariant failed"})
             out.append(candle)
-        if invalid:
+        if invalid and strict_validation:
             raise InvalidMarketDataError(symbol, interval, len(data), invalid)
         out.sort(key=lambda x: x.time_ms)
         if len({x.time_ms for x in out}) != len(out):
