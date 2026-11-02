@@ -1,0 +1,62 @@
+name: two-year-portfolio-backtest
+
+on:
+  pull_request:
+    branches:
+      - research/backtest-two-years
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "UTC start date (YYYY-MM-DD)"
+        required: true
+        default: "2024-10-30"
+      end_date:
+        description: "UTC end date, exclusive (YYYY-MM-DD)"
+        required: true
+        default: "2026-10-30"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signalhub-two-year-backtest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Download historical data and run portfolio backtest
+        env:
+          START_DATE: ${{ inputs.start_date || '2024-10-30' }}
+          END_DATE: ${{ inputs.end_date || '2026-10-30' }}
+        run: |
+          python scripts/run_two_year_portfolio_backtest.py \
+            --start "$START_DATE" \
+            --end "$END_DATE" \
+            --initial-equity 1000 \
+            --max-leverage 2 \
+            --risk-pct 0.5 \
+            --max-positions 5 \
+            --max-open-risk-pct 2.0 \
+            --fee-bps 5 \
+            --slippage-bps 2
+      - name: Add report to job summary
+        if: always() && hashFiles('artifacts/report/summary.md') != ''
+        run: cat artifacts/report/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload report and raw historical data
+        if: always() && hashFiles('artifacts/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: signalhub-two-year-backtest
+          path: artifacts/
+          retention-days: 30
