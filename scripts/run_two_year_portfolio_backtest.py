@@ -21,7 +21,6 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.backtest import HOUR_MS if False else None
 from app.funding import FundingRate, save_funding_csv
 from app.models import Candle
 from app.portfolio import run_portfolio_backtest
