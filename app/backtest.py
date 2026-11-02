@@ -55,11 +55,13 @@ def stats(trades:list[Trade],start_ms:int,end_ms:int,initial_equity:float=100.)-
       "funding_pnl_equity_pct":round(sum(t.funding_pnl_pct_equity for t in trades),5),
       "exit_reasons":{k:sum(t.exit_reason==k for t in trades) for k in ("STOP","TARGET","TIME")}}
 
-def position_fraction_for_risk(entry:float,stop:float,risk_pct:float,max_leverage:float=1.)->float:
-    if entry<=0 or not 0<risk_pct<=2 or not 0<max_leverage<=5: raise ValueError("Invalid entry/risk/leverage")
+def position_fraction_for_risk(entry:float,stop:float,risk_pct:float,max_leverage:float=1.,
+                                round_trip_cost_pct:float=0.)->float:
+    if entry<=0 or not 0<risk_pct<=2 or not 0<max_leverage<=5 or round_trip_cost_pct<0:
+        raise ValueError("Invalid entry/risk/leverage/cost")
     distance=abs(entry-stop)/entry
     if distance<=0: raise ValueError("Entry and stop must differ")
-    return min(max_leverage,(risk_pct/100)/distance)
+    return min(max_leverage,(risk_pct/100)/(distance+round_trip_cost_pct))
 
 def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps:float=5.,slippage_bps:float=2.,
                  risk_pct:float=.5,max_hold_bars:int=48,max_leverage:float=1.,
@@ -129,7 +131,7 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         exit_time=candles[exit_idx].time_ms+3600000
         exit_price*=1-cost if side=="LONG" else 1+cost
         gross=((exit_price-entry)/entry*100) if side=="LONG" else ((entry-exit_price)/entry*100)
-        fraction=position_fraction_for_risk(entry,stop,risk_pct,max_leverage)
+        fraction=position_fraction_for_risk(entry,stop,risk_pct,max_leverage,2*cost)
         # Settlement is charged only while position is open: entry <= fundingTime <= exit.
         funding_equity=sum(funding_cashflow_pct(side,entry,fraction,x.funding_rate,x.mark_price)
                            for x in funding if entry_bar.time_ms<=x.funding_time_ms<=exit_time)
@@ -146,6 +148,7 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
       "initial_equity":initial_equity,"funding_records_loaded":len(funding),"funding_settlements_in_test_window":expected_settlements,
       "funding":"HISTORICAL rates applied at settlements while position open" if funding else "MISSING - do not treat as full-cost futures result",
       "execution":"next 1H open; adverse costs; stop first if stop and target touched in same candle",
+      "drawdown_basis":"realized equity at closed-trade exits; excludes intra-trade unrealized mark-to-market drawdown",
       "lower_timeframe_price_action":"ENABLED: latest fully closed 15m candles passed at each hourly decision" if lower is not None else "DISABLED: no 15m dataset supplied",
       "signal_diagnostics":dict(sorted(diagnostics.items(),key=lambda x:(-x[1],x[0]))),
       "trades":[asdict(t) for t in trades]})
