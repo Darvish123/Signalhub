@@ -192,6 +192,18 @@ def write_report(result: dict, data_audit: dict, output: Path) -> None:
         )
     lines.extend([
         "",
+        "## Signal rejection diagnostics",
+        "",
+        "Counts below explain why hourly evaluations did not become entries. They are diagnostic counts, not trade counts.",
+        "",
+        "| Symbol | Rejection reason | Count |",
+        "|---|---|---:|",
+    ])
+    for symbol, row in result["symbol_data_audit"].items():
+        for reason, count in row.get("signal_diagnostics", {}).items():
+            lines.append(f"| {symbol} | {reason.replace('|', '/') } | {count} |")
+    lines.extend([
+        "",
         "## Data integrity",
         "",
         "| Symbol | 1H candles | Candle audit | Bitunix funding records | Funding audit |",
