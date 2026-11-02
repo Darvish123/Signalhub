@@ -4,6 +4,8 @@ class Settings(BaseSettings):
     database_path: str = "./data/signalhub.db"
     bitunix_futures_base_url: str = "https://fapi.bitunix.com"
     bitunix_spot_base_url: str = "https://www.bitunix.com"
+    bitunix_api_key: str = ""
+    bitunix_api_secret: str = ""
     request_timeout_seconds: float = 12.0
     min_quote_volume_24h: float = 1_000_000
     min_score: int = 70
