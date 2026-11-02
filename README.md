@@ -3,7 +3,7 @@
 Read-only market research, multi-timeframe signal screening and paper risk sizing. No private credentials, order placement, withdrawals or automated execution.
 
 ## Integrated signal pipeline
-- Public Bitunix Futures ticker and OHLCV retrieval.
+- Bitunix public Futures tickers for universe selection; OKX USDT linear perpetual OHLCV for all 1D/4H/1H/15m analysis, matching the historical backtest price source.
 - 1D directional bias (EMA20/EMA50).
 - 4H confirmed SMC structure alignment.
 - 1H BOS/CHoCH, liquidity sweep/FVG and ICT-style sweep → displacement/MSS → FVG retracement confluence.
@@ -44,7 +44,7 @@ Open http://127.0.0.1:8000/docs.
 - GET /v1/signals/{id}
 
 ## Backtesting
-The repository includes a 1H execution backtest using 1D/4H/1H SMC/ICT and the fully closed 15m Price Action trigger when a lower-timeframe dataset is supplied, plus a separate event-driven multi-symbol portfolio allocator. The two-year runner downloads and audits OKX 1H/15m OHLCV and Bitunix historical funding. These are cross-venue research tools, not exact Bitunix execution simulations; inspect every data audit before interpreting results. The portfolio report also includes per-symbol hourly signal-rejection diagnostics so a zero-trade run can be traced to the exact strategy gate without weakening the live or backtest rules. The diagnostics are observational only and do not change trade selection.
+The live scan and historical backtest now share the same OKX USDT linear perpetual OHLCV provider for 1D/4H/1H/15m analysis. Bitunix supplies the public ticker universe and historical funding/mark data. The 1H execution backtest uses the fully closed 15m Price Action trigger and a separate event-driven multi-symbol portfolio allocator. This remains a cross-venue benchmark, not exact Bitunix execution; inspect every data audit before interpreting results. The portfolio report also includes per-symbol hourly signal-rejection diagnostics so a zero-trade run can be traced to the exact strategy gate without weakening the live or backtest rules. The diagnostics are observational only and do not change trade selection.
 
 ## Validation and limitations
 - Run `python -m unittest discover -s tests -v` and `python -m compileall -q app scripts`.
