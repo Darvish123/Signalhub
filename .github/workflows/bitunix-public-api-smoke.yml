@@ -1,13 +1,20 @@
 name: bitunix-public-api-smoke
 
 on:
+  pull_request:
+    branches:
+      - research/backtest-two-years
   push:
     branches:
-      - research/integrated-backtest
+      - research/integrated-backtest-v2
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: signalhub-public-api-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   smoke:
