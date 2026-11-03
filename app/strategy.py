@@ -91,6 +91,14 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
                                           risks=["Minimum score not reached"],**base)
         return Signal(symbol=symbol,market=market,side=side,status="CANDIDATE",score=min(score,100),
             entry=entry,stop_loss=stop,take_profit_1=target,take_profit_2=target,net_rr=round(rr,3),
-            reasons=reasons,risks=["Paper-only; OHLC structure, zone and candle-pattern labels are heuristics, not proof of institutional activity"],created_at_ms=now_ms)
+            reasons=reasons,risks=["Paper-only; OHLC structure, zone and candle-pattern labels are heuristics, not proof of institutional activity"],created_at_ms=now_ms,
+            analysis_context={
+                "directional_bias": {"timeframe": "1D", "direction": side},
+                "zone_4h": {"source": zone["source_4h"], "source_index": zone["source_4h_index"]},
+                "zone_1h": {"lower": zone["lower"], "upper": zone["upper"],
+                            "invalidation": zone["invalidation"], "refined_by": zone["refined_by"]},
+                "liquidity": {"nearby": zone["liquidity_nearby"], "evidence": zone["liquidity_evidence"]},
+                "confirmation_15m": pa_setup,
+            })
     except ValueError as exc:
         return Signal(side="NONE",status="NO_TRADE",score=0,reasons=[],risks=[str(exc)],**base)
