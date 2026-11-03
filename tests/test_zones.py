@@ -88,6 +88,37 @@ class ZonePipelineTests(unittest.TestCase):
         self.assertEqual(result["status"], "CONFIRMED")
         self.assertEqual(result["zone"]["source_4h_index"], 40)
 
+
+    def test_short_zone_uses_bsl_pool_inside_parent_supply_zone(self):
+        h4_result = {
+            "order_blocks": [{
+                "direction": "BEARISH", "mitigation": "UNMITIGATED",
+                "lower": 99.0, "upper": 101.0, "index": 50,
+            }],
+        }
+        h1_result = {
+            "order_blocks": [{
+                "direction": "BEARISH", "mitigation": "UNMITIGATED",
+                "lower": 99.5, "upper": 100.5, "index": 65,
+            }],
+            "fair_value_gaps": [],
+            "fvg_lifecycle": [],
+            "liquidity_pools": [{
+                "kind": "BSL", "level": 101.0, "status": "RESTING",
+            }],
+            "liquidity_sweeps": [],
+            "swings": [],
+        }
+        # Make the latest price below the bearish supply zone so it is an
+        # accessible short-side pullback candidate.
+        h1 = candles(80, 3_600_000, close=98.0)
+        with patch("app.zones.analyse_smc",
+                   side_effect=[h4_result, h1_result]):
+            result = build_zone_context(self.h4, h1, "SHORT")
+        self.assertEqual(result["status"], "CONFIRMED")
+        self.assertEqual(result["zone"]["direction"], "SHORT")
+        self.assertEqual(result["zone"]["liquidity_evidence"][0]["kind"], "BSL")
+
     def test_rejects_zone_without_aligned_liquidity(self):
         no_liquidity = dict(self.h1_result, liquidity_pools=[], liquidity_sweeps=[])
         with patch("app.zones.analyse_smc",
