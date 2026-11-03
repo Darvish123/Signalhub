@@ -68,7 +68,7 @@ class StrategyIntegrationTests(unittest.TestCase):
     def run_pipeline(self, pa_result=None, lower_tf=None):
         with patch("app.strategy.analyse_smc",
                    side_effect=[self.h4_smc, self.h1_smc]), \
-             patch("app.strategy.build_zone_context", return_value={"status":"CONFIRMED","zone":{"direction":"LONG","lower":98.0,"upper":100.0,"invalidation":98.0,"refined_by":"1H_ORDER_BLOCK","liquidity_evidence":[{"type":"EQUAL_LEVEL_POOL"}]},"h1_swings":[{"kind":"LOW","index":45,"price":94.0},{"kind":"LOW","index":50,"price":95.0},{"kind":"LOW","index":55,"price":96.0}]}), \
+             patch("app.strategy.build_zone_context", return_value={"status":"CONFIRMED","zone":{"direction":"LONG","lower":98.0,"upper":100.0,"invalidation":98.0,"source_4h":"ORDER_BLOCK","source_4h_index":50,"refined_by":"1H_ORDER_BLOCK","liquidity_nearby":True,"liquidity_evidence":[{"type":"EQUAL_LEVEL_POOL"}]},"h1_swings":[{"kind":"LOW","index":45,"price":94.0},{"kind":"LOW","index":50,"price":95.0},{"kind":"LOW","index":55,"price":96.0}]}), \
              patch("app.strategy.analyse_price_action",
                    return_value=pa_result or self.pa):
             return analyse(
@@ -83,7 +83,7 @@ class StrategyIntegrationTests(unittest.TestCase):
         self.assertEqual(signal.status, "CANDIDATE", signal.risks)
         self.assertEqual(signal.side, "LONG")
         self.assertEqual(signal.entry, self.m15[-1].close)
-        self.assertLess(signal.stop_loss, 94.0)
+        self.assertEqual(signal.stop_loss, 94.0)
         self.assertGreater(signal.take_profit_1, signal.entry)
         self.assertGreaterEqual(signal.net_rr, 3.0)
         self.assertEqual(signal.score, 100)
