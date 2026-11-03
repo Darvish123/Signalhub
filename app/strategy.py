@@ -1,7 +1,7 @@
 """Zone-first strategy: 1D bias, 4H zone, 1H refinement/liquidity, 15m PA."""
 import math
 import time
-from app.analysis import atr,ema
+from app.analysis import ema
 from app.models import Candle,Signal
 from app.smc import analyse_smc
 from app.price_action import analyse_price_action
@@ -63,18 +63,18 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         pa_setup=pa["trigger"]
         score+=25; reasons.append(f"15m in-zone Price Action confirmed: {pa_setup['pattern']}")
         reasons.append(f"4H zone [{zone['lower']}, {zone['upper']}] refined on 1H; liquidity evidence={len(zone['liquidity_evidence'])}")
-        entry=lower_tf[-1].close; vol=atr(entry_tf,14); round_trip_cost=entry*(round_trip_cost_bps/10_000)
+        entry=lower_tf[-1].close; round_trip_cost=entry*(round_trip_cost_bps/10_000)
         swings=zone_result["h1_swings"]
         if side=="LONG":
             structural=[x["price"] for x in swings if x["kind"]=="LOW" and x["index"]<len(entry_tf)-1 and x["price"]<entry]
             if not structural: raise ValueError("No confirmed 1H swing low for structural invalidation")
-            stop=min(min(structural[-3:]),zone["invalidation"],pa_setup["invalidation"])-.10*vol
+            stop=min(min(structural[-3:]),zone["invalidation"],pa_setup["invalidation"])
             if not stop<entry: raise ValueError("Long structural stop is not below entry")
             risk=entry-stop; target=entry+(3*risk+4*round_trip_cost)
         else:
             structural=[x["price"] for x in swings if x["kind"]=="HIGH" and x["index"]<len(entry_tf)-1 and x["price"]>entry]
             if not structural: raise ValueError("No confirmed 1H swing high for structural invalidation")
-            stop=max(max(structural[-3:]),zone["invalidation"],pa_setup["invalidation"])+.10*vol
+            stop=max(max(structural[-3:]),zone["invalidation"],pa_setup["invalidation"])
             if not stop>entry: raise ValueError("Short structural stop is not above entry")
             risk=stop-entry; target=entry-(3*risk+4*round_trip_cost)
         net_loss=risk+round_trip_cost; net_gain=3*risk+3*round_trip_cost
