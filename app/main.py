@@ -45,7 +45,11 @@ async def klines(symbol: str, interval: str = "15m", limit: int = Query(100, ge=
         raise HTTPException(502, str(exc))
 
 @app.get("/v1/analysis/smc/{symbol}")
-async def smc_analysis(symbol: str, interval: str = "15m", limit: int = Query(200, ge=1, le=200)):
+async def smc_analysis(symbol: str, interval: str = "1h", limit: int = Query(200, ge=1, le=200)):
+    if interval == "15m":
+        raise HTTPException(400, "15m is reserved for zone-gated Price Action confirmation; SMC analysis is only used on 4H/1H context.")
+    if interval not in ("1d", "4h", "1h"):
+        raise HTTPException(400, "SMC interval must be one of: 1d, 4h, 1h")
     try:
         candles = await market_client.futures_klines(symbol.upper(), interval, limit)
         now_ms = time.time_ns() // 1_000_000
