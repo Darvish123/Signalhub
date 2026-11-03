@@ -27,11 +27,12 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         return Signal(side="NONE",status="NO_TRADE",score=0,reasons=["Insufficient history"],
                        risks=["Need at least 60 closed candles on 1D, 4H and 1H"],**base)
     try:
+        timeframe_ms = {"1D": 86_400_000, "4H": 14_400_000, "1H": 3_600_000}
         for name,rows in (("1D",regime),("4H",setup),("1H",entry_tf)):
             if any(not c.valid() for c in rows) or any(b.time_ms<=a.time_ms for a,b in zip(rows,rows[1:])):
                 raise ValueError(f"{name} candles invalid or non-chronological")
-            if rows[-1].time_ms>=now_ms:
-                raise ValueError(f"{name} latest candle is not closed before decision time")
+            if rows[-1].time_ms + timeframe_ms[name] > now_ms:
+                raise ValueError(f"{name} latest candle is not fully closed at decision time")
         d=[c.close for c in regime]; d20,d50=ema(d,20),ema(d,50)
         if d[-1]>d20>d50: side="LONG"; score=20; reasons=["1D bullish directional bias"]
         elif d[-1]<d20<d50: side="SHORT"; score=20; reasons=["1D bearish directional bias"]
