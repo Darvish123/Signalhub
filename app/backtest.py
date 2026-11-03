@@ -84,6 +84,11 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
     h4_close_times=[x.time_ms+14400000 for x in h4]
     d1_close_times=[x.time_ms+86400000 for x in d1]
     lower=validated_candles(lower_tf_candles,900000) if lower_tf_candles is not None else None
+    if lower is not None:
+        if lower[0].time_ms > candles[0].time_ms:
+            raise ValueError("15m data must cover the beginning of the 1H dataset")
+        if lower[-1].time_ms + 900000 < candles[-1].time_ms + 3600000:
+            raise ValueError("15m data must cover the final 1H decision candle")
     lower_times=[x.time_ms for x in lower] if lower is not None else []
     funding=sorted(funding_rates or [],key=lambda x:x.funding_time_ms)
     trades=[]; diagnostics=Counter(); i=0; cost=(fee_bps+slippage_bps)/10000
@@ -155,13 +160,18 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
     return report
 
 def main():
-    p=argparse.ArgumentParser(description="SignalHub 1D/4H/1H SMC futures backtest")
-    p.add_argument("--csv",required=True); p.add_argument("--funding-csv",required=True)
+    p=argparse.ArgumentParser(description="SignalHub 1D/4H/1H SMC + 15m PA futures backtest")
+    p.add_argument("--csv",required=True,help="1H OHLCV CSV")
+    p.add_argument("--lower-timeframe-csv",required=True,help="15m OHLCV CSV required for in-zone Price Action confirmation")
+    p.add_argument("--funding-csv",required=True,help="Historical funding CSV")
     p.add_argument("--symbol",default="BTCUSDT"); p.add_argument("--start",required=True); p.add_argument("--end",required=True)
     p.add_argument("--fee-bps",type=float,default=5.); p.add_argument("--slippage-bps",type=float,default=2.)
     p.add_argument("--risk-pct",type=float,default=.5); p.add_argument("--max-leverage",type=float,default=1.)
     p.add_argument("--initial-equity",type=float,default=100.); p.add_argument("--out",default="backtest-report.json")
-    a=p.parse_args(); data=load_csv(a.csv); rates=load_funding_csv(a.funding_csv)
+    a=p.parse_args()
+    data=load_csv(a.csv,interval_ms=3600000)
+    lower_data=load_csv(a.lower_timeframe_csv,interval_ms=900000)
+    rates=load_funding_csv(a.funding_csv)
     start_dt=datetime.fromisoformat(a.start)
     end_dt=datetime.fromisoformat(a.end)
     start_dt=start_dt.replace(tzinfo=timezone.utc) if start_dt.tzinfo is None else start_dt.astimezone(timezone.utc)
@@ -169,7 +179,8 @@ def main():
     start=int(start_dt.timestamp()*1000)
     end=int(end_dt.timestamp()*1000)+86400000-1
     result=run_backtest(data,a.symbol,start,end,a.fee_bps,a.slippage_bps,a.risk_pct,
-                        max_leverage=a.max_leverage,funding_rates=rates,initial_equity=a.initial_equity)
+                        max_leverage=a.max_leverage,funding_rates=rates,
+                        initial_equity=a.initial_equity,lower_tf_candles=lower_data)
     Path(a.out).write_text(json.dumps(result,indent=2),encoding="utf-8")
     print(json.dumps({k:v for k,v in result.items() if k!="trades"},indent=2))
 if __name__=="__main__": main()
