@@ -5,13 +5,13 @@ Read-only market research, multi-timeframe signal screening and paper risk sizin
 ## Integrated signal pipeline
 - Bitunix public Futures tickers for universe selection; OKX USDT linear perpetual OHLCV for all 1D/4H/1H/15m analysis, matching the historical backtest price source.
 - 1D directional bias (EMA20/EMA50).
-- 4H confirmed SMC structure alignment.
-- 1H BOS/CHoCH, liquidity sweep/FVG and ICT-style sweep → displacement/MSS → FVG retracement confluence.
-- 15m closed-candle price-action trigger.
+- 4H confirmed structure plus nearby supply/demand candidate zone (non-invalidated 4H order-block heuristic).
+- 1H refines the 4H zone by intersection with an aligned 1H order block or FVG, then checks nearby equal-high/low liquidity pools or recent aligned sweeps.
+- 15m is Price Action only: the latest fully closed candle must close inside the 1H-refined zone and confirm an aligned candle pattern. 15m SMC/ICT structure is not used for entry.
 - Structural invalidation stop, net reward/risk and rolling 24-closed-hour quote-volume gate.
 - Fail-closed handling: insufficient, invalid, stale or incomplete inputs produce NO_TRADE / DATA_ERROR rather than a forced signal.
 
-SMC/ICT/price-action detections are deterministic OHLC heuristics, not proof of institutional orders, intent or predictive edge.
+Structure, zone, liquidity and price-action detections are deterministic OHLC heuristics, not proof of resting orders, institutional activity, intent or predictive edge. The ICT sequence is no longer a mandatory entry gate in this zone-first pipeline.
 
 ## Risk engine
 Every scan candidate passes through `app.risk.evaluate_signal_risk` before storage/return:
@@ -37,14 +37,14 @@ Open http://127.0.0.1:8000/docs.
 - GET /health
 - GET /v1/market/tickers
 - GET /v1/market/klines/{symbol}?interval=15m&limit=100
-- GET /v1/analysis/smc/{symbol}?interval=15m&limit=200
+- GET /v1/analysis/smc/{symbol}?interval=4h&limit=200 (SMC context only on 1D/4H/1H; 15m is PA-only)
 - POST /v1/scan/{symbol}
 - POST /v1/scan?limit=10
 - GET /v1/signals
 - GET /v1/signals/{id}
 
 ## Backtesting
-The live scan and historical backtest now share the same OKX USDT linear perpetual OHLCV provider for 1D/4H/1H/15m analysis. Bitunix supplies the public ticker universe and historical funding/mark data. The 1H execution backtest uses the fully closed 15m Price Action trigger and a separate event-driven multi-symbol portfolio allocator. This remains a cross-venue benchmark, not exact Bitunix execution; inspect every data audit before interpreting results. The portfolio report also includes per-symbol hourly signal-rejection diagnostics so a zero-trade run can be traced to the exact strategy gate without weakening the live or backtest rules. The diagnostics are observational only and do not change trade selection.
+The live scan and historical backtest now share the same OKX USDT linear perpetual OHLCV provider for 1D/4H/1H/15m analysis. Bitunix supplies the public ticker universe and historical funding/mark data. The 1H execution backtest uses the same 4H-zone → 1H-refinement/liquidity → 15m in-zone Price Action sequence as the live strategy, with only fully closed 15m candles, and a separate event-driven multi-symbol portfolio allocator. This remains a cross-venue benchmark, not exact Bitunix execution; inspect every data audit before interpreting results. The portfolio report also includes per-symbol hourly signal-rejection diagnostics so a zero-trade run can be traced to the exact strategy gate without weakening the live or backtest rules. The diagnostics are observational only and do not change trade selection.
 
 ## Validation and limitations
 - Run `python -m unittest discover -s tests -v` and `python -m compileall -q app scripts`.
