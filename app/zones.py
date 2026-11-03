@@ -72,7 +72,11 @@ def build_zone_context(
             ):
                 refinements.append(("1H_ORDER_BLOCK", max(zlow, float(ob["lower"])),
                                     min(zhigh, float(ob["upper"])), ob["index"]))
+        fvg_states = {row["index"]: row["state"] for row in h1_smc.get("fvg_lifecycle", [])}
         for gap in h1_smc["fair_value_gaps"]:
+            lifecycle = fvg_states.get(gap["index"], "UNMITIGATED")
+            if lifecycle in ("INVALIDATED", "FILLED"):
+                continue
             if gap["direction"] == side and _overlap(
                 zlow, zhigh, float(gap["lower"]), float(gap["upper"])
             ):
@@ -90,7 +94,7 @@ def build_zone_context(
         pool_kind = "SSL" if direction == "LONG" else "BSL"
         liquidity = []
         for pool in h1_smc["liquidity_pools"]:
-            if pool["kind"] != pool_kind:
+            if pool["kind"] != pool_kind or pool["status"] != "RESTING":
                 continue
             level = float(pool["level"])
             distance = max(refined_low - level, level - refined_high, 0.0)
@@ -99,7 +103,7 @@ def build_zone_context(
                                   "level": level, "status": pool["status"],
                                   "distance_atr": round(distance / h1_atr, 3)})
         for sweep in h1_smc["liquidity_sweeps"][-12:]:
-            if sweep["direction"] != side:
+            if sweep["index"] < len(h1) - 12 or sweep["direction"] != side:
                 continue
             level = float(sweep["wick_extreme"])
             distance = max(refined_low - level, level - refined_high, 0.0)
