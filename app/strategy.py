@@ -1,4 +1,4 @@
-"""Multi-timeframe SMC strategy: 1D bias, 4H structure, 1H trigger."""
+"""Zone-first strategy: 1D bias, 4H zone, 1H refinement/liquidity, 15m PA."""
 import math
 import time
 from app.analysis import atr,ema
@@ -45,8 +45,7 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
         if lower_tf is None:
             return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                           risks=["15m Price Action confirmation is mandatory; no lower timeframe supplied"],**base)
-        h1=analyse_smc(entry_tf[-200:])
-        zone_result=build_zone_context(setup[-160:],entry_tf[-200:],side)
+        zone_result=build_zone_context(setup[-160:],entry_tf[-200:],side,h4_analysis=h4)
         if zone_result["status"]!="CONFIRMED":
             return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                           risks=[zone_result.get("reason","No confirmed 4H/1H zone and liquidity confluence")],**base)
@@ -62,12 +61,10 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
             return Signal(side="NONE",status="NO_TRADE",score=score,reasons=reasons,
                           risks=[pa.get("reason","No aligned 15m Price Action trigger inside refined zone")],**base)
         pa_setup=pa["trigger"]
-        tap=entry_tf[-1]
         score+=25; reasons.append(f"15m in-zone Price Action confirmed: {pa_setup['pattern']}")
-        score+=0
         reasons.append(f"4H zone [{zone['lower']}, {zone['upper']}] refined on 1H; liquidity evidence={len(zone['liquidity_evidence'])}")
         entry=lower_tf[-1].close; vol=atr(entry_tf,14); round_trip_cost=entry*(round_trip_cost_bps/10_000)
-        swings=h1["swings"]
+        swings=zone_result["h1_swings"]
         if side=="LONG":
             structural=[x["price"] for x in swings if x["kind"]=="LOW" and x["index"]<len(entry_tf)-1 and x["price"]<entry]
             if not structural: raise ValueError("No confirmed 1H swing low for structural invalidation")
@@ -94,6 +91,6 @@ def analyse(symbol:str,market:str,regime:list[Candle],setup:list[Candle],entry_t
                                           risks=["Minimum score not reached"],**base)
         return Signal(symbol=symbol,market=market,side=side,status="CANDIDATE",score=min(score,100),
             entry=entry,stop_loss=stop,take_profit_1=target,take_profit_2=target,net_rr=round(rr,3),
-            reasons=reasons,risks=["Paper-only; OHLC SMC/ICT labels are heuristic, not proof of institutional activity"],created_at_ms=now_ms)
+            reasons=reasons,risks=["Paper-only; OHLC structure, zone and candle-pattern labels are heuristics, not proof of institutional activity"],created_at_ms=now_ms)
     except ValueError as exc:
         return Signal(side="NONE",status="NO_TRADE",score=0,reasons=[],risks=[str(exc)],**base)
