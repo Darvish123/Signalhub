@@ -6,7 +6,7 @@ Read-only market research, multi-timeframe signal screening and paper risk sizin
 - Bitunix public Futures tickers for universe selection; OKX USDT linear perpetual OHLCV for all 1D/4H/1H/15m analysis, matching the historical backtest price source.
 - 1D directional bias (EMA20/EMA50).
 - 4H confirmed structure plus nearby supply/demand candidate zone (non-invalidated 4H order-block heuristic).
-- 1H refines the 4H zone by intersection with an aligned 1H order block or FVG, then checks nearby equal-high/low liquidity pools or recent aligned sweeps.
+- 1H refines the 4H zone by intersection with an aligned 1H order block or FVG; an aligned equal-high/low pool or recent sweep must be structurally located inside the parent 4H zone. Zone/liquidity proximity and stop invalidation use market structure, not ATR distance or ATR padding.
 - 15m is Price Action only: the latest fully closed candle must close inside the 1H-refined zone and confirm an aligned candle pattern. 15m SMC/ICT structure is not used for entry.
 - Structural invalidation stop, net reward/risk and rolling 24-closed-hour quote-volume gate.
 - Fail-closed handling: insufficient, invalid, stale or incomplete inputs produce NO_TRADE / DATA_ERROR rather than a forced signal.
