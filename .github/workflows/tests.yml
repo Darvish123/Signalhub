@@ -1,9 +1,28 @@
 name: tests
+
 on:
-  push:
-    branches: ["**"]
+  # Run once per pull-request update instead of duplicating every feature-branch
+  # push with both push and pull_request events.
   pull_request:
+    paths:
+      - "app/**"
+      - "scripts/**"
+      - "tests/**"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - "setup.cfg"
+      - "setup.py"
+      - ".github/workflows/tests.yml"
   workflow_dispatch:
+
+# Cancel stale runs for the same PR/ref when a newer commit arrives.
+concurrency:
+  group: signalhub-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   python:
     runs-on: ubuntu-24.04
@@ -13,6 +32,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
         shell: bash
         run: |
@@ -38,4 +59,4 @@ jobs:
             unittest.log
             compileall.log
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
