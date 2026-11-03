@@ -1,4 +1,4 @@
-"""Single-position 1H execution backtest with 1D/4H/1H SMC and historical funding."""
+"""Single-position 1H execution backtest using the zone-first MTF pipeline."""
 import argparse,csv,json
 from bisect import bisect_right
 from collections import Counter
@@ -143,7 +143,7 @@ def run_backtest(candles:list[Candle],symbol:str,start_ms:int,end_ms:int,fee_bps
         i=exit_idx+1
     report=stats(trades,start_ms,end_ms,initial_equity)
     expected_settlements=sum(start_ms<=x.funding_time_ms<=end_ms for x in funding)
-    report.update({"symbol":symbol,"timeframe":"1H execution; 1D/4H/1H SMC + closed 15m PA trigger" if lower is not None else "1H execution; 1D/4H/1H SMC (15m PA not supplied)","strategy":"SMC: 1D bias + 4H BOS/CHoCH + 1H BOS/CHoCH and sweep/FVG; optional 15m closed-candle PA; structural swing invalidation stop; 3R target",
+    report.update({"symbol":symbol,"timeframe":"1H execution; 1D/4H/1H SMC + closed 15m PA trigger" if lower is not None else "1H execution; 1D/4H/1H SMC (15m PA not supplied)","strategy":"1D bias + 4H zone discovery + 1H zone refinement/liquidity + mandatory in-zone closed 15m PA; structural invalidation stop; 3R target",
       "fee_bps_per_side":fee_bps,"slippage_bps_per_side":slippage_bps,"risk_pct_per_trade":risk_pct,"max_leverage":max_leverage,
       "initial_equity":initial_equity,"funding_records_loaded":len(funding),"funding_settlements_in_test_window":expected_settlements,
       "funding":"HISTORICAL rates applied at settlements while position open" if funding else "MISSING - do not treat as full-cost futures result",
