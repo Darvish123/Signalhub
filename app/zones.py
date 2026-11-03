@@ -20,6 +20,7 @@ def build_zone_context(
     max_distance_atr: float = 4.0,
     liquidity_distance_atr: float = 2.0,
     lookback: int = 160,
+    h4_analysis: dict | None = None,
 ) -> dict:
     """Find a nearby 4H OB, refine it with 1H OB/FVG, and audit nearby liquidity.
 
@@ -39,7 +40,7 @@ def build_zone_context(
     side = "BULLISH" if direction == "LONG" else "BEARISH"
     h4 = h4_candles[-lookback:]
     h1 = h1_candles[-lookback:]
-    h4_smc = analyse_smc(h4)
+    h4_smc = h4_analysis if h4_analysis is not None else analyse_smc(h4)
     h1_smc = analyse_smc(h1)
     h4_atr = atr(h4, 14)
     h1_atr = atr(h1, 14)
@@ -112,6 +113,7 @@ def build_zone_context(
         invalidation = refined_low if direction == "LONG" else refined_high
         return {
             "status": "CONFIRMED",
+            "h1_swings": h1_smc["swings"],
             "zone": {
                 "direction": direction,
                 "lower": refined_low,
