@@ -61,4 +61,18 @@ class BacktestTests(unittest.TestCase):
    result=run_backtest(rows,"TESTUSDT",start,rows[-1].time_ms)
   self.assertGreater(result["signal_diagnostics"].get("1D trend is not aligned",0),0)
 
+ def test_backtest_rejects_15m_data_missing_initial_coverage(self):
+  rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(1700)]
+  lower=[Candle((i+1)*900000,100,101,99,100,250,2.5) for i in range(1700*4)]
+  start=rows[1500].time_ms
+  with self.assertRaisesRegex(ValueError,"beginning of the 1H dataset"):
+   run_backtest(rows,"TESTUSDT",start,rows[-1].time_ms,lower_tf_candles=lower)
+
+ def test_backtest_rejects_15m_data_missing_final_coverage(self):
+  rows=[Candle(i*3600000,100,101,99,100,1000,10) for i in range(1700)]
+  lower=[Candle(i*900000,100,101,99,100,250,2.5) for i in range(1700*4-1)]
+  start=rows[1500].time_ms
+  with self.assertRaisesRegex(ValueError,"final 1H decision candle"):
+   run_backtest(rows,"TESTUSDT",start,rows[-1].time_ms,lower_tf_candles=lower)
+
 if __name__=="__main__": unittest.main()
