@@ -46,6 +46,31 @@ class PriceActionTests(unittest.TestCase):
         self.assertEqual(result["status"],"TRIGGER_CONFIRMED")
         self.assertEqual(result["trigger"]["pattern"],"MORNING_STAR")
 
+    def test_bearish_pin_bar_added(self):
+        rows=[row(i,100,106,99,100) for i in range(12)]
+        rows[-1]=row(11,100.3,103,100.1,100.2)
+        result=analyse_price_action(rows,"SHORT")
+        self.assertEqual(result["status"],"TRIGGER_CONFIRMED")
+        self.assertEqual(result["trigger"]["pattern"],"BEARISH_PIN_BAR")
+
+    def test_evening_star_added(self):
+        rows=[row(i,100,101,99,100) for i in range(12)]
+        rows[-3]=row(9,100,103,99,102.5)
+        rows[-2]=row(10,102.4,103,102,102.5)
+        rows[-1]=row(11,102.5,103,99,99.5)
+        result=analyse_price_action(rows,"SHORT")
+        self.assertEqual(result["status"],"TRIGGER_CONFIRMED")
+        self.assertEqual(result["trigger"]["pattern"],"EVENING_STAR")
+
+    def test_inside_bar_breakdown_added(self):
+        rows=[row(i,100,101,99,100) for i in range(12)]
+        rows[-3]=row(9,100,102,98,100)
+        rows[-2]=row(10,100,101,99,100.5)
+        rows[-1]=row(11,99.5,100,97,97.5)
+        result=analyse_price_action(rows,"SHORT")
+        self.assertEqual(result["status"],"TRIGGER_CONFIRMED")
+        self.assertEqual(result["trigger"]["pattern"],"INSIDE_BAR_BREAKDOWN")
+
     def test_inside_bar_breakout_added(self):
         rows=[row(i,100,101,99,100) for i in range(12)]
         rows[-3]=row(9,100,102,98,100)
