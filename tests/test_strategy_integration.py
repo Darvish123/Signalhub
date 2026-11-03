@@ -68,7 +68,7 @@ class StrategyIntegrationTests(unittest.TestCase):
     def run_pipeline(self, pa_result=None, lower_tf=None):
         with patch("app.strategy.analyse_smc",
                    side_effect=[self.h4_smc, self.h1_smc]), \
-             patch("app.strategy.analyse_ict", return_value=self.ict), \
+             patch("app.strategy.build_zone_context", return_value={"status":"CONFIRMED","zone":{"direction":"LONG","lower":98.0,"upper":100.0,"invalidation":98.0,"refined_by":"1H_ORDER_BLOCK","liquidity_evidence":[{"type":"EQUAL_LEVEL_POOL"}]}}), \
              patch("app.strategy.analyse_price_action",
                    return_value=pa_result or self.pa):
             return analyse(
@@ -88,7 +88,17 @@ class StrategyIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(signal.net_rr, 3.0)
         self.assertEqual(signal.score, 100)
         self.assertTrue(any("15m Price Action" in reason for reason in signal.reasons))
-        self.assertTrue(any("ICT sequence confirmed" in reason for reason in signal.reasons))
+        self.assertTrue(any("1H refined 4H zone" in reason for reason in signal.reasons))
+        self.assertTrue(any("15m in-zone Price Action" in reason for reason in signal.reasons))
+
+    def test_pipeline_fails_closed_when_no_refined_zone_or_liquidity(self):
+        with patch("app.strategy.analyse_smc", return_value=self.h4_smc), \
+             patch("app.strategy.build_zone_context", return_value={"status":"NO_ZONE","zone":None,"reason":"No 1H liquidity near the 4H zone"}):
+            signal = analyse("BTCUSDT", "USDT_PERP", self.daily, self.h4, self.h1,
+                min_score=70, min_rr=3.0, min_quote_volume=1_000_000,
+                round_trip_cost_bps=14.0, now_ms=self.now, lower_tf=self.m15)
+        self.assertEqual(signal.status, "NO_TRADE")
+        self.assertIn("No 1H liquidity", signal.risks[0])
 
     def test_pipeline_fails_closed_when_15m_trigger_is_missing(self):
         no_pa = {"status": "NO_TRIGGER", "trigger": None,
